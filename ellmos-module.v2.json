@@ -1,0 +1,40 @@
+{
+  "schema": "ellmos.module.v2",
+  "id": "TASKPLAN",
+  "display_name": "TASKPLAN",
+  "category": "memory",
+  "kind": "library",
+  "status": "active",
+  "visibility": "public-candidate",
+  "provides": [
+    "tasks.default",
+    "tasks.workflow"
+  ],
+  "requires": [],
+  "optional": [],
+  "conflicts": [],
+  "surfaces": [
+    "library",
+    "cli",
+    "workflow"
+  ],
+  "state": {
+    "ownership": "external",
+    "location": "user-home"
+  },
+  "boundaries": {
+    "network": "none",
+    "data": "user-local",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  "source_of_truth": {
+    "type": "local-directory",
+    "path": ".",
+    "repository": null
+  },
+  "adapters": []
+}
