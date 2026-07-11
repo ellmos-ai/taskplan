@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taskplan"
+dynamic = ["version"]
+description = "Standalone SQLite task module of the .MEMORY stack (USMC + GARDENER + TASKPLAN). Extracted from rinnsal/tasks; zero dependencies."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{name = "Lukas Geiger"}]
+keywords = ["tasks", "task-management", "sqlite", "llm", "agent", "local-first", "zero-dependency"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "taskplan.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["taskplan*"]
