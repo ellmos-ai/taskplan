@@ -5,6 +5,13 @@ import unittest
 from pathlib import Path
 
 from taskplan.client import TaskClient, get_default_db_path
+from taskplan import (
+    TASKSOLVER,
+    TASKWRITER,
+    get_workflow_prompt,
+    get_workflow_prompt_path,
+    list_workflows,
+)
 
 
 class TestTaskClient(unittest.TestCase):
@@ -158,6 +165,28 @@ class TestTasksApi(unittest.TestCase):
         task = self.api.add_from_ticket("T-20260711-02", "Nur Ticket-Ref")
         self.assertEqual(self.api.get(task['id'])['tags'],
                          "ticket:T-20260711-02")
+
+
+class TestWorkflowPrompts(unittest.TestCase):
+    def test_workflows_are_imported_from_taskplan(self):
+        self.assertEqual(list_workflows(), ("TASKSOLVER", "TASKWRITER"))
+        self.assertIn("ROLLE: Du bist der TASKSOLVER", TASKSOLVER)
+        self.assertIn("ROLLE: Du bist der TASKWRITER", TASKWRITER)
+
+    def test_prompt_lookup_is_case_insensitive(self):
+        self.assertEqual(get_workflow_prompt("tasksolver"), TASKSOLVER)
+        self.assertEqual(get_workflow_prompt(" TaskWriter "), TASKWRITER)
+
+    def test_prompt_paths_are_real_utf8_files(self):
+        for name in list_workflows():
+            path = get_workflow_prompt_path(name)
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.read_text(encoding="utf-8"),
+                             get_workflow_prompt(name))
+
+    def test_unknown_workflow_fails_clearly(self):
+        with self.assertRaisesRegex(KeyError, "Unbekannter TASKPLAN-Workflow"):
+            get_workflow_prompt("unknown")
 
 
 if __name__ == "__main__":

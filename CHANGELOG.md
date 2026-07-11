@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — 2026-07-11
+
+### Added
+- TASKSOLVER und TASKWRITER als gebündelte, importierbare Workflow-Prompts.
+- `get_workflow_prompt()`, `get_workflow_prompt_path()` und `list_workflows()`.
+- Paketdaten-Konfiguration und Tests für Import, Lookup, UTF-8 und reale Promptpfade.
+
 ## 0.1.0 — 2026-07-11
 
 ### Added

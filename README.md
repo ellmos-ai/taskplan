@@ -29,6 +29,33 @@ for t in tasks.list():
 tasks.done(1)
 ```
 
+## Importierbare Workflow-Prompts
+
+TASKPLAN liefert die systemweiten Rollen **TASKSOLVER** und **TASKWRITER** als
+Paketressourcen mit. Dadurch verwenden Python-Integrationen, Agenten-Starter und
+das lokale Control-Center dieselbe kanonische Promptfassung:
+
+```python
+from taskplan import (
+    TASKSOLVER,
+    TASKWRITER,
+    get_workflow_prompt,
+    get_workflow_prompt_path,
+    list_workflows,
+)
+
+print(list_workflows())
+print(get_workflow_prompt("TASKSOLVER"))
+print(get_workflow_prompt_path("TASKWRITER"))
+```
+
+- **TASKSOLVER** erledigt pro Loop ein zusammenhängendes Aufgaben-Bundle in
+  genau einem Projekt und markiert Tasks erst nach empirischer Prüfung als erledigt.
+- **TASKWRITER** erkennt und formalisiert pro Loop Aufgaben in genau einem
+  Projekt, führt sie aber nicht aus.
+- Tasks bleiben von Tickets getrennt; beide Workflows benutzen TASKPLAN als
+  Task-Speicher und respektieren lokale Projekt-, Lock- und Rechtekonventionen.
+
 Or with an explicit client:
 
 ```python

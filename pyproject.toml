@@ -27,3 +27,6 @@ version = {attr = "taskplan.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["taskplan*"]
+
+[tool.setuptools.package-data]
+"taskplan.prompts" = ["*.txt"]
