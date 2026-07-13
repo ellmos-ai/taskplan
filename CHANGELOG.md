@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- Repository-Hygiene erweitert: lokale Env-/Token-/Credential-/Recovery-/Key-,
+  Zertifikats- und SQLite-Sidecar-Dateien werden ignoriert und per Test
+  abgesichert.
+
 ## 0.2.0 — 2026-07-11
 
 ### Added
