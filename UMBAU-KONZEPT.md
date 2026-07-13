@@ -362,21 +362,75 @@ bekommt zusätzlich ein hartes Gate:
 ## 7. Konfiguration: orthogonale Achsen statt Modus-Enum
 
 Der Nutzerwunsch („nur Oberfläche / Oberfläche plus deep / nur easy deep / easy plus harder deep
-/ usw.") ist keine Liste von Modi, sondern **drei unabhängige Achsen**. Als Enum bräuchte man für
-jedes „usw." einen neuen Wert; als Achsen ist die Kombinatorik geschenkt.
+/ usw.") ist keine Liste von Modi, sondern ein Satz **unabhängiger Achsen**. Als Enum bräuchte man
+für jedes „usw." einen neuen Wert; als Achsen ist die Kombinatorik geschenkt.
+
+Die Achsen: **Tiefe** (Oberfläche / Tiefe) × **Aufwandsdecke** (easy / medium) × **aktive Rollen**
+(einzeln an/aus) × **Ausführungsform** (getrennt / zusammengelegt) × **Aufgabenquellen** (welche
+Dateien, welches Format).
+
+**Rollen einzeln abschaltbar:** Steht eine Rolle auf `false` und wird ihr Starter trotzdem
+aufgerufen, **bricht der Durchlauf beim Start sauber ab** (mit Meldung, kein stiller Leerlauf) —
+so kann ein Starter im Autostart bleiben, ohne dass man ihn entfernen muss.
+
+**„3-in-1" (`combined = true`):** Ein Worker durchläuft alle *aktiven* Rollen nacheinander im selben
+Kontext, statt drei getrennte Instanzen zu starten. Der Reiz ist der geteilte Kontext — wer gerade
+als Writer ein Projekt gelesen hat, kann es als Solver ohne erneutes Einlesen bearbeiten.
+Die Schalter kombinieren sich frei: **`maintainer = false` + `combined = true` ergibt genau den
+2-in-1-Worker** aus deinem Beispiel, ohne dass es dafür einen eigenen Modus bräuchte.
+
+> **Default: alle drei Rollen aktiv, getrennte Instanzen** (`combined = false`).
+> Die Rollentrennung ist eine Qualitätsgrenze — der Writer soll *nicht* ausführen, was er gerade
+> selbst formuliert hat (TASKWRITERs Gate „Keine Aufgaben-Ausführung durch TASKWRITER"). Im
+> `combined`-Modus muss diese Grenze **innerhalb** des Workers als Phasenwechsel erhalten bleiben:
+> erst vollständig schreiben, dann als Solver neu bewerten — nicht beides in einem Zug vermischen.
 
 ```toml
 # taskplan.toml — Modul-Verhalten (nutzerneutral, gehört zum Package)
 [loop]
 depth          = "surface+deep"   # surface | surface+deep | deep
 effort_ceiling = "medium"         # easy | medium   (large/special nie autonom)
-roles          = ["taskwriter", "tasksolver", "maintainer"]
 
 [loop.deep]
-easy_first          = true   # erst alle easy erschöpfen, dann harder
-return_to_surface   = true   # zwischen zwei Deep-Dives zurück an die Oberfläche
+enabled             = true   # false = reiner Oberflaechenbetrieb (heutiges Verhalten)
+easy_first_globally = true   # easy ueber ALLE Roots erschoepfen, erst dann medium (§4)
+return_to_surface   = true   # zwischen zwei Deep-Dives zurueck an die Oberflaeche
 roots_per_dive      = 1      # genau eine Root pro Tauchgang
 projects_per_dive   = 1      # genau ein Projekt pro Durchlauf
+
+# --- Rollen: einzeln abschaltbar, optional zusammengelegt -------------------
+[roles]
+taskwriter = true
+tasksolver = true
+maintainer = true    # false => Maintainer-Start bricht sofort sauber ab
+
+# "3-in-1": EIN Worker deckt alle aktiven Rollen nacheinander ab, statt drei
+# getrennte Instanzen. Kombiniert sich frei mit den Schaltern oben —
+# maintainer=false + combined=true ergibt faktisch einen 2-in-1-Worker.
+combined = false     # Default: getrennte Instanzen, alle drei aktiv
+
+# --- Aufgabenquellen: welche Dateien enthalten Aufgaben? --------------------
+# Nicht hartcodiert — andere Installationen nutzen andere Konventionen.
+# NICHT zu verwechseln mit traversal.levels.markers (§4.1): Marker sagen
+# "hier IST ein Projekt", Sources sagen "hier STEHEN Aufgaben drin".
+# Ueberschneidung ist normal (TODO.md ist oft beides), Gleichsetzung nicht.
+[[sources]]
+file   = "TODO.md"
+format = "markdown_checkbox"    # - [ ] offen / - [x] erledigt
+[[sources]]
+file   = "AUFGABEN.txt"
+format = "plain_lines"          # eine Aufgabe je nicht-leerer Zeile
+[[sources]]
+file   = "ROADMAP.md"
+format = "markdown_checkbox"
+read_only = true                # Kontext/Ziele — hier schreibt der Writer nicht hinein
+[[sources]]
+glob   = "*.todo"               # statt festem Namen auch Muster moeglich
+format = "plain_lines"
+
+# Eingebaute Parser: markdown_checkbox | markdown_bullet | plain_lines |
+# yaml_frontmatter | jsonl. Reicht das nicht, registriert die Installation
+# einen eigenen Parser — das Modul erzwingt keine Textkonvention.
 
 [locks]
 read_always_allowed = true
