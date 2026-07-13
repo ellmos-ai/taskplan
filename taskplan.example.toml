@@ -1,0 +1,137 @@
+# TASKPLAN — Beispielkonfiguration
+#
+# Kopieren nach:  ~/.taskplan/taskplan.toml   (benutzerweit)
+#             oder ./taskplan.toml            (projektlokal, hat Vorrang)
+#
+# NICHTS hiervon ist Pflicht. Ohne Konfiguration gelten die Defaults, und die
+# sind die konservativen: alle drei Rollen aktiv und getrennt, Tiefe an,
+# Aufwandsdecke "medium", Lock-Provider "lockmaster".
+
+# ---------------------------------------------------------------------------
+# SPEICHER — wo die Aufgaben liegen
+# ---------------------------------------------------------------------------
+[storage]
+backend = "sqlite"                       # sqlite (empfohlen) | files | custom
+path = "~/.taskplan/taskplan.db"
+
+# Aufloesung (erster Treffer gewinnt):
+#   1. ENV TASKPLAN_DB      (Notausstieg fuer einen einzelnen Lauf)
+#   2. diese Datei
+#   3. ENV RINNSAL_DB       (Alt-Kompatibilitaet)
+#   4. ~/.taskplan/taskplan.db
+#
+# Welche DB gerade aktiv ist:  python -m taskplan doctor
+# Der Doctor WARNT, wenn die aktive DB leer ist, waehrend eine andere Daten
+# enthaelt — genau dieser stille Fehler kostete hier Wochen: Schreibzugriffe
+# landeten in einer Datenbank, die niemand liest.
+
+# ---------------------------------------------------------------------------
+# LOOP — Tiefe und Aufwandsdecke
+# ---------------------------------------------------------------------------
+[loop]
+effort_ceiling = "medium"   # easy | medium
+                            # large/special sind NIE autonom, unabhaengig davon
+max_bundle_size = 3         # Aufgaben je Durchlauf — aus EINEM Projekt
+
+[loop.deep]
+enabled = true              # false = nur Oberflaeche (das alte Verhalten)
+easy_first_globally = true  # easy ueber ALLE Roots erschoepfen, DANN erst medium
+                            # Begruendung: Leichte Aufgaben entlasten genau die,
+                            # die tief in einem Spezialthema stecken. Deshalb
+                            # existiert die Unterscheidung ueberhaupt.
+projects_per_dive = 1
+
+# ---------------------------------------------------------------------------
+# ROLLEN — einzeln abschaltbar, optional zusammengelegt
+# ---------------------------------------------------------------------------
+[roles]
+taskwriter = true     # erkennt und formalisiert Aufgaben
+tasksolver = true     # arbeitet sie ab
+maintainer = true     # haelt Dateien und Verzeichnisse sauber
+                      # false -> der Starter bricht sauber ab (kein Leerlauf)
+
+combined = false      # true = EIN Worker deckt alle aktiven Rollen ab,
+                      # statt drei getrennter Instanzen.
+                      # maintainer=false + combined=true ergibt den 2-in-1-Worker.
+                      #
+                      # ACHTUNG: Die Rollentrennung ist eine QUALITAETSGRENZE —
+                      # der Writer soll nicht ausfuehren, was er selbst gerade
+                      # formuliert hat. Im combined-Modus muss sie als
+                      # Phasenwechsel im Worker erhalten bleiben.
+
+# ---------------------------------------------------------------------------
+# MODELLE — gehoeren in die Konfiguration, nicht in den Starter
+# ---------------------------------------------------------------------------
+[models]
+default    = "claude-sonnet-5"
+taskwriter = "claude-sonnet-5"   # Analyse/Formalisierung
+tasksolver = "claude-opus-4-8"   # setzt um, braucht mehr Urteil
+maintainer = "claude-sonnet-5"   # mechanische Pflege
+
+# ---------------------------------------------------------------------------
+# TRAVERSIERUNG — was ist eine Root, was ein Projekt?
+# ---------------------------------------------------------------------------
+[traversal]
+# Das Roots-Inventar wird NICHT dupliziert. Existiert schon eine Roots-Liste
+# (z. B. die des Lock-Scanners), zeigt man hierauf — zwei Listen wuerden
+# unweigerlich auseinanderlaufen.
+roots_file = "~/OneDrive/_scripts/lock_roots.json"
+
+# Alternativ (oder zusaetzlich) direkt:
+# roots = ["~/projekte/alpha", "~/projekte/beta"]
+
+skip_dirs = ["_archive", "_archiviert", "node_modules", ".venv", "__pycache__"]
+
+# Die Ebenen sind konfigurierbar, nicht fest verdrahtet. Genau EINE traegt
+# `is_work_unit` — sie bestimmt, was Rotation, Lock-Scope und `project_path`
+# als "Projekt" verstehen.
+#
+# Zweistufig (Default): Root -> Projekt
+[[traversal.levels]]
+name = "root"
+
+[[traversal.levels]]
+name = "project"
+markers = ["TODO.md", "ROADMAP.md", "AUFGABEN.md", ".git", "pyproject.toml"]
+is_work_unit = true
+
+# Dreistufig (Root -> Slot -> Unterprojekt): einfach eine Ebene dazwischen
+# haengen. Ein Slot braucht keine Marker — er gruppiert nur.
+#
+# [[traversal.levels]]
+# name = "root"
+# [[traversal.levels]]
+# name = "slot"
+# [[traversal.levels]]
+# name = "project"
+# markers = ["TODO.md"]
+# is_work_unit = true
+
+# ---------------------------------------------------------------------------
+# LOCKS — andere Systeme, andere Lock-Systeme
+# ---------------------------------------------------------------------------
+[locks]
+# "lockmaster" = bekanntes Schema (LOCK*.txt + LOCK.permissions.json).
+#                Wird deterministisch ausgewertet.
+# "rules"      = FREMDES Lock-System. Das Modul wertet dann NICHTS aus, sondern
+#                reicht die hinterlegten Regeldateien als Text in den Prompt —
+#                das LLM liest sie und wendet sie an.
+#                Lieber ein Agent, der die echte Regel liest, als ein Parser,
+#                der ihre Bedeutung errät.
+# "none"       = kein Lock-System.
+provider = "lockmaster"
+max_depth = 4
+
+# Nur fuer provider = "rules" (oder ergaenzend):
+# rule_paths = ["~/meinprojekt/LOCK-REGELN.md"]
+
+# Das Achsenmodell gilt unabhaengig vom Provider:
+#   Lesen/Analysieren   IMMER erlaubt — ein Lock schuetzt vor Aenderung,
+#                       nicht vor Kenntnisnahme.
+#   Neue Datei anlegen  in der Regel erlaubt (kollidiert nicht mit fremder
+#                       Arbeit an BESTEHENDEN Dateien).
+#   Aendern             nur ohne fremden Lock im Scope.
+#   LOCK.user*.txt      absolut — nur der Nutzer entfernt ihn.
+#
+# Und: Ein Lock in einem Projekt sperrt DIESES Projekt. Nicht seine Nachbarn
+# und nicht die ganze Pipeline.

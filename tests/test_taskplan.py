@@ -9,6 +9,7 @@ from taskplan.client import TaskClient, get_default_db_path
 from taskplan import (
     TASKSOLVER,
     TASKWRITER,
+    MAINTAINER,
     get_workflow_prompt,
     get_workflow_prompt_path,
     list_workflows,
@@ -221,9 +222,18 @@ class TestTasksApi(unittest.TestCase):
 
 class TestWorkflowPrompts(unittest.TestCase):
     def test_workflows_are_imported_from_taskplan(self):
-        self.assertEqual(list_workflows(), ("TASKSOLVER", "TASKWRITER"))
+        self.assertEqual(list_workflows(),
+                         ("TASKSOLVER", "TASKWRITER", "MAINTAINER"))
         self.assertIn("ROLLE: Du bist der TASKSOLVER", TASKSOLVER)
         self.assertIn("ROLLE: Du bist der TASKWRITER", TASKWRITER)
+        self.assertIn("ROLLE: Du bist der MAINTAINER", MAINTAINER)
+
+    def test_maintainer_carries_its_hardest_gate(self):
+        """Der MAINTAINER ist die zerstoererischste Rolle (Dateien verschieben,
+        Listen leeren, Logs kuerzen). Sein Kerngate darf nicht wegredigiert
+        werden."""
+        self.assertIn("NIE HART LOESCHEN", MAINTAINER)
+        self.assertIn("ARCHIVIEREN VOR KUERZEN", MAINTAINER)
 
     def test_prompt_lookup_is_case_insensitive(self):
         self.assertEqual(get_workflow_prompt("tasksolver"), TASKSOLVER)

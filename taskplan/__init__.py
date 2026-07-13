@@ -34,7 +34,33 @@ from .config import (  # noqa: F401
 from .workflows import (  # noqa: F401
     TASKSOLVER,
     TASKWRITER,
+    MAINTAINER,
     get_workflow_prompt,
     get_workflow_prompt_path,
     list_workflows,
+)
+
+from .traversal import (  # noqa: F401
+    Level,
+    Project,
+    TraversalConfig,
+    find_projects,
+    find_roots,
+)
+
+from .locks import (  # noqa: F401
+    CREATE,
+    MODIFY,
+    READ,
+    LockView,
+    build_lock_view,
+    scan_lockmaster,
+)
+
+from .selector import (  # noqa: F401
+    DEEP,
+    SURFACE,
+    Bundle,
+    SelectorConfig,
+    next_bundle,
 )

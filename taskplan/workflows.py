@@ -12,6 +12,7 @@ from pathlib import Path
 _WORKFLOW_FILES = {
     "TASKSOLVER": "TASKSOLVER.txt",
     "TASKWRITER": "TASKWRITER.txt",
+    "MAINTAINER": "MAINTAINER.txt",
 }
 
 
@@ -58,4 +59,5 @@ def get_workflow_prompt_path(name: str) -> Path:
 
 TASKSOLVER = get_workflow_prompt("TASKSOLVER")
 TASKWRITER = get_workflow_prompt("TASKWRITER")
+MAINTAINER = get_workflow_prompt("MAINTAINER")
 
