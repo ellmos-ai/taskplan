@@ -468,7 +468,60 @@ arbeitet", sind aber nicht deckungsgleich. Zu klären, bevor der Selektor gebaut
 Das ist eine echte Designentscheidung, keine Formalie — sie bestimmt, welche vier Bereiche der Loop
 heute überhaupt nicht anfasst.
 
-### 7.1 Nutzerneutralität — die Trennlinie
+### 7.1 Der Speicher ist austauschbar (Backend-Abstraktion)
+
+Heute ist der Speicher hart verdrahtet: SQLite, Tabelle `rinnsal_tasks`, Pfad aus drei ENV-Namen.
+Ein anderer Anwender kann TASKPLAN damit **nur** benutzen, wenn er auch unsere DB benutzt — und ein
+Anwender, der seine Aufgaben längst in einem anderen System führt, kann die Loops gar nicht erst
+einsetzen.
+
+> **Vorgabe:** Der Speicher ist ein **Adapter hinter einem schmalen Protokoll**. Unser SQLite-Backend
+> ist der empfohlene Default — aber es ist *ein* Backend, nicht *das* Backend.
+
+Das Protokoll ist bewusst klein, damit fremde Systeme realistisch anschließbar bleiben:
+
+```python
+class TaskStore(Protocol):
+    def add(self, task: Task) -> Task: ...
+    def get(self, task_id: str) -> Task | None: ...
+    def list(self, *, status=None, effort=None, project_path=None,
+             scope=None, limit=50) -> list[Task]: ...
+    def update(self, task_id: str, **fields) -> bool: ...
+    def find_duplicate(self, root_id, source, title) -> Task | None: ...
+```
+
+Der **Selektor arbeitet ausschließlich gegen dieses Protokoll** — er kennt kein SQL. Damit ist der
+Zustandsautomat (§4) unabhängig davon, wo die Aufgaben liegen.
+
+```toml
+[storage]
+backend = "sqlite"                 # sqlite (empfohlen) | files | custom
+path    = "~/.taskplan/taskplan.db"   # nur fuer sqlite; EIN Ort, ENV-Wildwuchs entfaellt (§1.8)
+
+# Alternative: Aufgaben bleiben in den Projektdateien, keine DB
+# backend = "files"                # Quelle der Wahrheit sind die [[sources]]-Dateien selbst
+
+# Alternative: fremdes System (Issue-Tracker, eigene DB, ...)
+# backend      = "custom"
+# entry_point  = "meinpaket.tasks:MeinStore"   # muss TaskStore erfuellen
+```
+
+**Zwei Backends bringt das Modul selbst mit:**
+
+| Backend | Wahrheit liegt in | Für wen |
+|---|---|---|
+| `sqlite` *(Default, empfohlen)* | einer DB | Wer Status, Aufwand und Historie über viele Projekte hinweg abfragen will |
+| `files` | den `[[sources]]`-Dateien | Wer keine DB will — Aufgaben leben in `TODO.md` & Co., die Loops lesen und schreiben dort direkt |
+
+Das `files`-Backend ist mehr als eine Geste: Es macht TASKPLAN für ein einzelnes Repo brauchbar,
+ohne dass jemand eine Datenbank aufsetzen muss. Preis: kein `effort`-Index, also langsamere globale
+Auswahl — bei wenigen Projekten irrelevant.
+
+**Grenze, die ehrlich benannt gehört:** Ein fremdes Backend kann `effort` und `scope` (§3) nicht
+zwingend abbilden. Fehlen sie, degradiert der Selektor kontrolliert — er behandelt unklassifizierte
+Aufgaben als `medium`/`local` und **meldet das**, statt still ein anderes Verhalten zu zeigen.
+
+### 7.2 Nutzerneutralität — die Trennlinie
 
 | Ins Package (`taskplan/`) | In die Installation (Env) |
 |---|---|
@@ -476,7 +529,9 @@ heute überhaupt nicht anfasst.
 | Aufwandsklassen und ihre Gates | Pfade, Host-Namen, DB-Ort |
 | Lock-Achsenmodell | `MANIFEST.md`-Regelkette |
 | Die drei Rollen-Prompts | Register-Dateien, Rotationsstand |
-| Config-Schema + Defaults | Die konkreten Config-Werte |
+| Config-**Schema** + Defaults | Die konkreten Config-**Werte** |
+| `TaskStore`-Protokoll + die 2 mitgelieferten Backends | Backend-Wahl, fremde Adapter |
+| Die eingebauten Datei-Parser | Welche Aufgabendateien es hier gibt |
 
 > **Warnung an die Umsetzung:** Dieses Konzept ist aus Lukas' Logs abgeleitet. Es darf **kein**
 > Pipeline-Name (`.UNI`, `.AI`, `.SOFTWARE`, …) und **kein** Host-Name (`WORKSTATION`) im Package
@@ -493,8 +548,9 @@ jemand die Projektebene formalisiert haben, bevor jemand sie abarbeiten kann.
 |---|---|---|
 | **0** | **DB-Split beheben** (§1.8): `TASKPLAN_DB` auf die Live-DB setzen, ENV-Namen konsolidieren | Sofort, unabhängig. Sonst schreibt jeder API-Nutzer in die leere DB. |
 | **1** | **Datenmodell** (§3): Spalten + Migration der `tags`-Konvention | Fundament — ohne `effort` kein Gate. |
-| **2** | **Projekt-Definition + Traversierung** (§4.1) | Ohne „was ist ein Projekt" kein Abstieg. |
-| **3** | **Selektor** (§4) als Code, mit Unit-Tests | Das Herzstück. Ersetzt Prompt-Prosa. |
+| **1b** | **`TaskStore`-Protokoll** (§7.1) + SQLite-Backend dahinter | Muss **vor** dem Selektor stehen, sonst wird gegen SQL gebaut statt gegen das Protokoll — und die Austauschbarkeit ist nachträglich nicht mehr einzuziehen. |
+| **2** | **Ebenen-Definition + Traversierung** (§4.1) | Ohne „was ist ein Projekt" kein Abstieg. |
+| **3** | **Selektor** (§4) als Code, gegen `TaskStore`, mit Unit-Tests | Das Herzstück. Ersetzt Prompt-Prosa. Testbar gegen einen In-Memory-Store. |
 | **4** | **Lock-Achsenmodell** (§5) + `LockView` | Muss vor dem ersten Deep-Dive stehen. |
 | **5** | **TASKWRITER auf Tiefe** — klassifiziert `effort` beim Anlegen | Füllt den Deep-Backlog. |
 | **6** | **TASKSOLVER auf Tiefe** — konsumiert mit Gate | Kann erst jetzt sinnvoll tauchen. |
