@@ -113,10 +113,20 @@ def traversal_config():
         levels = [Level(name="root"),
                   Level(name="project", is_work_unit=True)]
 
+    # `max_depth` schaltet den Auto-Modus ein: das oberste markierte Verzeichnis
+    # je Pfad. Noetig, sobald die Roots unterschiedlich tief sind — und das sind
+    # sie fast immer (Spiele direkt unter der Wurzel, Software-Projekte eine
+    # Kategorie-Ebene tiefer). Eine starre Ebenenzahl findet dann nur die eine
+    # Sorte.
+    raw_depth = section.get("max_depth")
+    max_depth = int(raw_depth) if raw_depth is not None else None
+
     return TraversalConfig(
         roots=roots,
         levels=levels,
         skip_dirs=tuple(section.get("skip_dirs", DEFAULT_SKIP_DIRS)),
+        max_depth=max_depth,
+        markers=tuple(section.get("markers", []) or []),
     )
 
 

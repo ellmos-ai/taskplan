@@ -19,6 +19,7 @@ braucht, haengt eine an.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -49,13 +50,35 @@ class Level:
 
 @dataclass
 class TraversalConfig:
+    """Wie tief liegt ein Projekt?
+
+    Zwei Betriebsarten — weil beide gebraucht werden:
+
+    `levels`     STARRE Ebenenzahl. Ein Projekt liegt auf genau einer Ebene.
+                 Praezise, aber alle Roots muessen gleich tief sein.
+
+    `max_depth`  AUTO. Ein Projekt ist das OBERSTE markierte Verzeichnis auf
+                 seinem Pfad, bis zu dieser Tiefe. Noetig, sobald die Roots
+                 unterschiedlich tief sind — und das ist der Normalfall:
+                 Spiele liegen direkt unter ihrer Wurzel, Software-Projekte
+                 haengen eine Kategorie-Ebene tiefer.
+
+    Ist `max_depth` gesetzt, gewinnt der Auto-Modus.
+
+    Grenze des Auto-Modus, ehrlich benannt: Traegt eine ZWISCHENebene selbst
+    einen Marker (ein `TODO.md` im Kategorie-Ordner), gilt sie als Projekt. Wer
+    das ausschliessen muss, nimmt `levels` oder setzt den Ordner auf `skip_dirs`.
+    """
     roots: List[Path] = field(default_factory=list)
     levels: List[Level] = field(default_factory=list)
     skip_dirs: tuple[str, ...] = DEFAULT_SKIP_DIRS
+    max_depth: Optional[int] = None
+    markers: tuple[str, ...] = ()
 
     def __post_init__(self):
         self.roots = [Path(r) for r in self.roots]
         self.skip_dirs = tuple(self.skip_dirs)
+        self.markers = tuple(self.markers)
 
     @property
     def work_level_index(self) -> int:
@@ -64,6 +87,15 @@ class TraversalConfig:
             if level.is_work_unit:
                 return index
         return len(self.levels) - 1
+
+    def effective_markers(self) -> tuple[str, ...]:
+        if self.markers:
+            return self.markers
+        if self.levels:
+            work = self.levels[self.work_level_index]
+            if work.markers:
+                return work.markers
+        return DEFAULT_MARKERS
 
 
 @dataclass(frozen=True)
@@ -84,6 +116,12 @@ def find_roots(lock_roots_json: Path) -> List[Path]:
     Roots-Liste anzulegen wuerde unweigerlich auseinanderlaufen — deshalb wird
     diese hier wiederverwendet statt dupliziert.
 
+    Ein Root ist entweder ein blosser Pfad oder ein Objekt `{"path": ...,
+    "shallow": true}`. Die Pfade koennen Umgebungsvariablen enthalten
+    (`%USERPROFILE%` auf Windows, `$HOME` auf Unix) — sie werden aufgeloest.
+    Genau daran scheiterte der erste Versuch: 17 Roots, 0 gefunden, weil
+    `%USERPROFILE%` als Verzeichnisname interpretiert wurde.
+
     Nicht (mehr) existierende Eintraege werden uebersprungen, nicht als Fehler
     behandelt: Ein umbenannter Ordner darf den ganzen Lauf nicht abbrechen.
     """
@@ -93,31 +131,91 @@ def find_roots(lock_roots_json: Path) -> List[Path]:
     except (OSError, ValueError):
         return []
 
-    raw_roots = data.get("roots", [])
     roots: List[Path] = []
-    for entry in raw_roots:
-        # Ein Root kann ein blosser Pfad sein oder ein Objekt mit "path".
+    for entry in data.get("roots", []):
         raw = entry.get("path") if isinstance(entry, dict) else entry
         if not raw:
             continue
-        candidate = Path(str(raw)).expanduser()
+        candidate = Path(os.path.expandvars(str(raw))).expanduser()
         if candidate.is_dir():
             roots.append(candidate)
     return roots
+
+
+def shallow_roots(lock_roots_json: Path) -> set[str]:
+    """Roots, die als `shallow` markiert sind — riesige Baeume (z. B. Wissens-
+    ablagen), die nur flach gescannt werden duerfen. Der Lock-Scanner kennt die
+    Markierung bereits; wir respektieren sie, statt uns an OneDrive festzufahren.
+    """
+    path = Path(lock_roots_json)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    marked = set()
+    for entry in data.get("roots", []):
+        if isinstance(entry, dict) and entry.get("shallow"):
+            raw = entry.get("path", "")
+            resolved = Path(os.path.expandvars(str(raw))).expanduser()
+            marked.add(resolved.name)
+    return marked
 
 
 def _has_marker(directory: Path, markers: Iterable[str]) -> bool:
     return any((directory / marker).exists() for marker in markers)
 
 
+def _find_projects_auto(config: TraversalConfig,
+                        roots: List[Path]) -> List[Project]:
+    """Auto-Modus: das OBERSTE markierte Verzeichnis je Pfad, bis `max_depth`.
+
+    Noetig, sobald die Roots unterschiedlich tief sind — der Normalfall. Eine
+    starre Ebenenzahl findet dann entweder die flachen ODER die tiefen Projekte,
+    nie beide.
+
+    Sobald ein Verzeichnis als Projekt erkannt ist, wird NICHT weiter hinabgestiegen:
+    Ein Unterordner eines Projekts ist Teil davon, kein eigenes Projekt.
+    """
+    markers = config.effective_markers()
+    max_depth = config.max_depth or 3
+    projects: List[Project] = []
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+        frontier = [root]
+        for _ in range(max_depth):
+            nxt: List[Path] = []
+            for parent in frontier:
+                try:
+                    children = [c for c in parent.iterdir() if c.is_dir()]
+                except OSError:
+                    continue
+                for child in children:
+                    if child.name in config.skip_dirs:
+                        continue
+                    if _has_marker(child, markers):
+                        projects.append(Project(path=child, root_id=root.name))
+                    else:
+                        nxt.append(child)   # nur unmarkierte Zweige weiterverfolgen
+            frontier = nxt
+            if not frontier:
+                break
+    return projects
+
+
 def find_projects(config: TraversalConfig,
                   only_root: Optional[Path] = None) -> List[Project]:
     """Findet alle Arbeitseinheiten unterhalb der konfigurierten Roots.
 
-    Steigt genau so tief wie die Ebenenliste vorgibt — kein unbegrenzter
-    Baumscan. Ein Marker auf einer HOEHEREN Ebene macht diese nicht zur
-    Arbeitseinheit (ein `TODO.md` im Slot-Ordner ist Slot-Doku, kein Projekt).
+    Kein unbegrenzter Baumscan: Entweder die Ebenenliste gibt die Tiefe vor, oder
+    `max_depth` begrenzt den Auto-Modus.
     """
+    roots = [Path(only_root)] if only_root is not None else config.roots
+
+    if config.max_depth is not None:
+        return _find_projects_auto(config, roots)
+
     if not config.levels:
         return []
 
@@ -127,8 +225,6 @@ def find_projects(config: TraversalConfig,
 
     work_level = config.levels[work_index]
     markers = work_level.markers or DEFAULT_MARKERS
-
-    roots = [Path(only_root)] if only_root is not None else config.roots
     projects: List[Project] = []
 
     for root in roots:

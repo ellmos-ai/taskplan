@@ -232,8 +232,8 @@ class TestWorkflowPrompts(unittest.TestCase):
         """Der MAINTAINER ist die zerstoererischste Rolle (Dateien verschieben,
         Listen leeren, Logs kuerzen). Sein Kerngate darf nicht wegredigiert
         werden."""
-        self.assertIn("NIE HART LOESCHEN", MAINTAINER)
-        self.assertIn("ARCHIVIEREN VOR KUERZEN", MAINTAINER)
+        self.assertIn("NIE HART LÖSCHEN", MAINTAINER)
+        self.assertIn("ARCHIVIEREN VOR KÜRZEN", MAINTAINER)
 
     def test_prompt_lookup_is_case_insensitive(self):
         self.assertEqual(get_workflow_prompt("tasksolver"), TASKSOLVER)

@@ -103,6 +103,51 @@ class TestSkipDirs(unittest.TestCase):
         self.assertEqual(names, ["echt"])
 
 
+class TestAutoDepth(unittest.TestCase):
+    """Der Normalfall: Die Roots sind UNTERSCHIEDLICH tief.
+
+    Auf dem realen System liegen Spiele direkt unter ihrer Wurzel, Software-
+    Projekte aber eine Kategorie-Ebene tiefer. Eine starre Ebenenzahl fand
+    deshalb nur die eine Sorte — mit levels=2 lieferte .SOFTWARE genau NULL
+    Projekte, obwohl dort 81 liegen.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        # flach: Projekt direkt unter der Root
+        _touch(self.tmp / ".ROBLOX" / "SpielA" / "TODO.md")
+        _touch(self.tmp / ".ROBLOX" / "SpielB" / "TODO.md")
+        # tief: Kategorie-Ebene dazwischen
+        _touch(self.tmp / ".SW" / "CASH" / "Rechnung" / "TODO.md")
+        _touch(self.tmp / ".SW" / "DATA" / "Parser" / "pyproject.toml")
+        self.config = TraversalConfig(
+            roots=[self.tmp / ".ROBLOX", self.tmp / ".SW"],
+            max_depth=3,
+            markers=("TODO.md", "pyproject.toml"),
+        )
+
+    def test_finds_both_shallow_and_deep_projects(self):
+        names = sorted(p.name for p in find_projects(self.config))
+        self.assertEqual(names, ["Parser", "Rechnung", "SpielA", "SpielB"])
+
+    def test_root_id_is_the_root_not_the_category(self):
+        by_name = {p.name: p.root_id for p in find_projects(self.config)}
+        self.assertEqual(by_name["Rechnung"], ".SW")
+        self.assertEqual(by_name["SpielA"], ".ROBLOX")
+
+    def test_does_not_descend_into_a_project(self):
+        """Ein Unterordner eines Projekts ist Teil davon, kein eigenes Projekt."""
+        _touch(self.tmp / ".ROBLOX" / "SpielA" / "modul" / "TODO.md")
+        names = [p.name for p in find_projects(self.config)]
+        self.assertNotIn("modul", names)
+
+    def test_max_depth_is_respected(self):
+        """Kein unbegrenzter Baumscan — sonst faehrt man sich in OneDrive fest."""
+        _touch(self.tmp / ".SW" / "A" / "B" / "C" / "D" / "TODO.md")
+        names = [p.name for p in find_projects(self.config)]
+        self.assertNotIn("D", names)
+
+
 class TestRootsFromLockRoots(unittest.TestCase):
     """Das Roots-Inventar wird NICHT neu erfunden: lock_roots.json existiert
     bereits und ist die Quelle der Wahrheit. Zwei Listen wuerden auseinanderlaufen."""
@@ -130,6 +175,20 @@ class TestRootsFromLockRoots(unittest.TestCase):
 
     def test_missing_file_yields_empty(self):
         self.assertEqual(find_roots(self.tmp / "gibtsnicht.json"), [])
+
+    def test_env_vars_in_paths_are_expanded(self):
+        """Die echten Roots stehen als %USERPROFILE%\OneDrive\... in der Datei.
+        Ohne Aufloesung findet man NULL Roots — genau das passierte zuerst."""
+        import os
+        os.environ["TP_TEST_ROOT"] = str(self.tmp)
+        roots_file = self.tmp / "env_roots.json"
+        roots_file.write_text(
+            '{"roots": [{"path": "%TP_TEST_ROOT%/a", "shallow": true}]}'
+            if os.name == "nt" else
+            '{"roots": [{"path": "$TP_TEST_ROOT/a"}]}',
+            encoding="utf-8")
+        roots = find_roots(roots_file)
+        self.assertEqual([r.name for r in roots], ["a"])
 
 
 if __name__ == "__main__":
