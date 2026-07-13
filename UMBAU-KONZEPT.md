@@ -138,12 +138,16 @@ Schreibvorgänge in einer gespaltenen Datenbank**: Tasks landen in einer DB, die
 der bestehende Bestand ist für den Schreiber unsichtbar. Sollte unabhängig vom übrigen Umbau sofort
 geschlossen werden.
 
-### 1.10 Nebenbefund: Die Loops laufen auf einem teuren Modell
+### 1.10 Nebenbefund: Das Modell ist im Starter festgenagelt
 
-`START-TASKSOLVER.bat` und `START-TASKWRITER.bat` starten beide mit `--model claude-sonnet-5`.
-Das widerspricht der geltenden Routing-Vorgabe (Sonnet 5 ist in Summe teurer als die Opus-Klasse;
-Basisworker sollen auf Opus/Sonnet-4.6 laufen). Da beide Loops dauerhaft und wiederkehrend laufen,
-ist das ein laufender Kostenposten. Gehört in denselben Umbau — Aufwand: zwei Zeilen.
+`START-TASKSOLVER.bat` und `START-TASKWRITER.bat` starten beide fest mit `--model claude-sonnet-5`.
+Das Modell selbst ist korrekt (Sonnet 5 und Opus 4.8 sind die gesetzten Zielmodelle) — **das Problem
+ist die Verdrahtung**: Die Modellwahl steckt hartcodiert in zwei `.bat`-Dateien der Installation,
+statt in der Modul-Konfiguration zu stehen.
+
+Damit ist sie (a) nicht ohne Datei-Edit änderbar, (b) nicht pro Rolle differenzierbar (ein leichter
+Maintainer-Durchlauf braucht kein Denkmodell) und (c) nicht nutzerneutral — ein anderer Anwender
+erbt Lukas' Modellwahl. Gehört als Achse in die Config (§7).
 
 ### 1.9 Keine Konfiguration für Tiefe oder Modus
 
@@ -346,6 +350,14 @@ projects_per_dive   = 1      # genau ein Projekt pro Durchlauf
 read_always_allowed = true
 create_allowed      = true   # neue Datei in gelocktem Ordner
 modify_requires_free_scope = true
+
+# Modellwahl gehoert ins Modul, nicht in den Starter (§1.10) — pro Rolle
+# einstellbar, mit neutralem Default. Die Starter lesen sie nur noch aus.
+[models]
+default    = "claude-sonnet-5"
+taskwriter = "claude-sonnet-5"   # Analyse/Formalisierung
+tasksolver = "claude-opus-4-8"   # Umsetzung, braucht mehr Urteil
+maintainer = "claude-sonnet-5"   # mechanische Pflege
 ```
 
 **Das Roots-Inventar wird NICHT neu erfunden — es existiert bereits.**
@@ -434,4 +446,5 @@ jemand die Projektebene formalisiert haben, bevor jemand sie abarbeiten kann.
 6. **17 Lock-Roots vs. 13 Rotations-Pipelines** (§7): dieselben Orte mit unterschiedlichem Zweck —
    oder vier Bereiche, die nie in die Rotation aufgenommen wurden und deshalb heute unbearbeitet
    bleiben?
-7. **Modell der Loops:** `--model claude-sonnet-5` in beiden Startern (§1.10) auf Opus umstellen?
+7. **Modellzuordnung pro Rolle** (§7, `[models]`): Der Vorschlag gibt dem TASKSOLVER Opus 4.8
+   (er setzt um und braucht Urteil), Writer und Maintainer Sonnet 5. Passt die Aufteilung?
