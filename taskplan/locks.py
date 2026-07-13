@@ -191,17 +191,96 @@ def load_rule_texts(rule_paths: List[Path]) -> List[str]:
     return texts
 
 
+class LazyLockView(LockView):
+    """Prueft Locks BEDARFSGESTEUERT statt alles vorab zu scannen.
+
+    Der Vollscan (`scan_lockmaster`) laeuft rekursiv durch jede Root. Ueber
+    einen Cloud-Ordner mit 16 Roots dauert das Minuten — und ist verschwendet:
+    Der Selektor fragt am Ende nur nach den paar Projekten, die ueberhaupt
+    Aufgaben haben.
+
+    Diese Variante geht stattdessen vom ANGEFRAGTEN Verzeichnis nach OBEN und
+    sucht die Lock-Dateien auf dem Weg zur Wurzel. Das sind eine Handvoll
+    Verzeichnis-Zugriffe pro Anfrage statt eines Baumscans — und es findet
+    dieselben Locks, weil ein Lock immer entweder im Projekt selbst oder ueber
+    ihm liegt.
+    """
+
+    def __init__(self, roots: Optional[List[Path]] = None,
+                 ttl_hours: int = DEFAULT_LOCK_TTL_HOURS):
+        super().__init__()
+        self._roots = [Path(r).resolve() for r in (roots or [])]
+        self._ttl = ttl_hours
+        self._cache: Dict[Path, List[Lock]] = {}
+
+    def _chain(self, directory: Path) -> List[Path]:
+        """Das Verzeichnis und seine Eltern — hoechstens bis zu einer Root."""
+        directory = Path(directory).resolve()
+        chain = [directory]
+        for parent in directory.parents:
+            chain.append(parent)
+            if parent in self._roots:
+                break
+        return chain
+
+    def _locks_in(self, directory: Path) -> List[Lock]:
+        if directory in self._cache:
+            return self._cache[directory]
+        found: List[Lock] = []
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            entries = []
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            if entry.name.lower() == "lock.permissions.json":
+                try:
+                    self.permissions[directory] = json.loads(
+                        entry.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    pass
+            elif LOCK_FILE_PATTERN.match(entry.name):
+                found.append(Lock(
+                    path=directory,
+                    file=entry,
+                    is_user_lock=bool(USER_LOCK_PATTERN.match(entry.name)),
+                    expired=_is_expired(entry, self._ttl),
+                ))
+        self._cache[directory] = found
+        return found
+
+    def locks_for(self, directory: Path) -> List[Lock]:
+        hits: List[Lock] = []
+        for step in self._chain(directory):
+            hits.extend(lock for lock in self._locks_in(step) if lock.active)
+        return hits
+
+    def allows(self, directory: Path, action: str) -> bool:
+        if action == READ:
+            return True
+        # Die Kette einmal ablaufen — das fuellt zugleich `permissions`.
+        self.locks_for(directory)
+        return super().allows(directory, action)
+
+
 def build_lock_view(provider: str,
                     roots: Optional[List[Path]] = None,
                     rule_paths: Optional[List[Path]] = None,
-                    max_depth: int = 4) -> LockView:
-    """Baut den Lock-Zustand gemaess dem konfigurierten Provider."""
+                    max_depth: int = 4,
+                    eager: bool = False) -> LockView:
+    """Baut den Lock-Zustand gemaess dem konfigurierten Provider.
+
+    `eager=True` erzwingt den Vollscan (nuetzlich fuer eine Uebersicht). Im
+    Regelbetrieb wird bedarfsgesteuert geprueft — sonst kostet ein einzelner
+    Loop-Lauf Minuten in einem Cloud-Ordner.
+    """
     if provider == "lockmaster":
-        view = scan_lockmaster(roots or [], max_depth=max_depth)
-    elif provider == "rules":
-        # Fremdes System: nichts auswerten, nur die Regeln durchreichen.
-        view = LockView()
+        view = (scan_lockmaster(roots or [], max_depth=max_depth)
+                if eager else LazyLockView(roots or []))
     else:
+        # "rules": fremdes System -> nichts auswerten, nur durchreichen.
+        # "none":  kein Lock-System.
         view = LockView()
 
     if rule_paths:

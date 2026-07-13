@@ -190,9 +190,18 @@ class TestForeignLockSystem(unittest.TestCase):
         self.assertEqual(view.locks, [])
         self.assertEqual(len(view.extra_rules), 1)
 
-    def test_provider_lockmaster_scans(self):
-        _touch(self.tmp / "projekt" / "LOCK.txt")
+    def test_provider_lockmaster_enforces(self):
+        """Auf das VERHALTEN pruefen, nicht auf die interne Liste: Der Provider
+        wertet bedarfsgesteuert aus, `locks` ist vorab absichtlich leer."""
+        project = self.tmp / "projekt"
+        _touch(project / "LOCK.txt")
         view = build_lock_view("lockmaster", roots=[self.tmp])
+        self.assertFalse(view.allows(project, MODIFY))
+        self.assertTrue(view.allows(project, READ))
+
+    def test_provider_lockmaster_eager_fills_the_list(self):
+        _touch(self.tmp / "projekt" / "LOCK.txt")
+        view = build_lock_view("lockmaster", roots=[self.tmp], eager=True)
         self.assertEqual(len(view.locks), 1)
 
     def test_provider_none_is_permissive(self):
@@ -203,3 +212,45 @@ class TestForeignLockSystem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLazyLockView(unittest.TestCase):
+    """Bedarfsgesteuerte Pruefung: dieselben Ergebnisse, ohne Vollscan.
+
+    Der Vollscan ueber einen Cloud-Ordner mit 16 Roots dauert Minuten — und ist
+    verschwendet, weil am Ende nur die paar Projekte gefragt sind, die auch
+    Aufgaben haben.
+    """
+
+    def setUp(self):
+        from taskplan.locks import LazyLockView
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = self.tmp / ".RESEARCH"
+        self.locked = self.root / "RH"
+        self.sibling = self.root / "CRM"
+        _touch(self.locked / "LOCK.txt")
+        self.sibling.mkdir(parents=True)
+        self.view = LazyLockView([self.root])
+
+    def test_same_verdict_as_full_scan(self):
+        eager = scan_lockmaster([self.root])
+        for directory in (self.locked, self.sibling, self.root):
+            for action in (READ, CREATE, MODIFY):
+                self.assertEqual(
+                    self.view.allows(directory, action),
+                    eager.allows(directory, action),
+                    f"Lazy und Vollscan sind sich uneinig: {directory.name}/{action}")
+
+    def test_lock_above_is_found(self):
+        _touch(self.root / "LOCK.txt")
+        from taskplan.locks import LazyLockView
+        view = LazyLockView([self.root])
+        self.assertFalse(view.allows(self.sibling, MODIFY))
+
+    def test_does_not_look_beyond_the_root(self):
+        """Ein Lock OBERHALB der Root geht uns nichts an — sonst wandert die
+        Suche ins Nirgendwo hinauf."""
+        _touch(self.tmp / "LOCK.txt")
+        from taskplan.locks import LazyLockView
+        view = LazyLockView([self.root])
+        self.assertTrue(view.allows(self.sibling, MODIFY))
