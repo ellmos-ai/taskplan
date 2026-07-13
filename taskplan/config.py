@@ -84,6 +84,27 @@ def selector_config():
     )
 
 
+def discovery_mode() -> str:
+    """Wie werden Projekte gefunden?
+
+    "auto"    nur ueber Marker (TODO.md, .git, ...). Schnell, aber blind fuer
+              Systeme, die andere Konventionen haben.
+    "manual"  NUR die gepflegte Registry (projects.json). Fuer Installationen,
+              deren Struktur sich nicht aus Dateinamen ableiten laesst.
+    "hybrid"  beides — Automatik plus Registry, dedupliziert. Der Default:
+              die Automatik traegt, die Registry korrigiert.
+    """
+    section = load_config().get("traversal", {}) or {}
+    mode = str(section.get("discovery", "hybrid")).lower()
+    return mode if mode in ("auto", "manual", "hybrid") else "hybrid"
+
+
+def registry_file() -> str:
+    """Pfad der manuellen Projektliste ("" = Default ~/.taskplan/projects.json)."""
+    section = load_config().get("traversal", {}) or {}
+    return str(section.get("registry_file", ""))
+
+
 def traversal_config():
     """Baut die TraversalConfig aus der Konfigurationsdatei.
 

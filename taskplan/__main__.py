@@ -3,6 +3,77 @@
 import sys
 
 
+def _projects_command(args: list[str]) -> int:
+    """Die manuelle Projekt-Registry — der Fallback der Auto-Erkennung.
+
+    Die Automatik erkennt Projekte an Markern. Findet sie eines nicht (andere
+    Konventionen, keine Steuerdatei) oder faelschlich (eine Kategorie-Ebene sieht
+    aus wie ein Projekt), traegt man es hier von Hand ein. Der MAINTAINER pflegt
+    die Liste automatisch nach.
+    """
+    from .config import discovery_mode, registry_file, traversal_config
+    from .registry import (add_project, load_registry, registry_path,
+                           remove_project)
+    from .traversal import discover_projects, find_projects
+
+    action = args[0] if args else "list"
+    configured = registry_file()
+
+    if action == "list":
+        entries = load_registry(configured)
+        auto = find_projects(traversal_config())
+        total = discover_projects(traversal_config(), discovery_mode(), configured)
+        print(f"Discovery-Modus : {discovery_mode()}")
+        print(f"Registry-Datei  : {registry_path(configured)}")
+        print()
+        print(f"Automatisch erkannt : {len(auto)}")
+        print(f"Manuell eingetragen : {len(entries)}")
+        print(f"Ergibt zusammen     : {len(total)}")
+        if entries:
+            print()
+            print("Manuelle Eintraege:")
+            for entry in entries:
+                note = f"  ({entry.note})" if entry.note else ""
+                print(f"  [{entry.root_id}] {entry.path}{note}")
+        return 0
+
+    if action == "add":
+        if len(args) < 3:
+            print("Nutzung: python -m taskplan projects add <pfad> <root_id> "
+                  "[notiz] [--by <wer>]", file=sys.stderr)
+            return 2
+        by = ""
+        rest = list(args[1:])
+        if "--by" in rest:
+            index = rest.index("--by")
+            if index + 1 < len(rest):
+                by = rest[index + 1]
+            rest = rest[:index] + rest[index + 2:]
+        path, root_id = rest[0], rest[1]
+        note = rest[2] if len(rest) > 2 else ""
+        if add_project(path, root_id, note=note, added_by=by,
+                       configured=configured):
+            print(f"Eingetragen: [{root_id}] {path}")
+            return 0
+        print(f"Bereits vorhanden: {path}")
+        return 0
+
+    if action == "remove":
+        if len(args) < 2:
+            print("Nutzung: python -m taskplan projects remove <pfad>",
+                  file=sys.stderr)
+            return 2
+        if remove_project(args[1], configured=configured):
+            print(f"Eintrag entfernt: {args[1]}")
+            print("(Nur der Eintrag — auf der Platte wurde nichts geloescht.)")
+            return 0
+        print(f"Kein Eintrag gefunden: {args[1]}", file=sys.stderr)
+        return 1
+
+    print(f"Unbekannt: {action!r}. Erlaubt: list | add | remove", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     command = args[0] if args else "help"
@@ -20,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
             if index + 1 < len(rest):
                 role = rest[index + 1]
         return run(role=role, as_json="--json" in rest)
+
+    if command == "projects":
+        return _projects_command(rest)
 
     if command == "prompt":
         from .workflows import get_workflow_prompt

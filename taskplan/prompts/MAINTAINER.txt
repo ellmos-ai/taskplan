@@ -62,7 +62,33 @@ AUFGABENFELDER
    - Im gekürzten Log bleibt ein Hinweis (Datum, Zeilenzahl, Archivpfad), damit die Spur nicht reißt.
    - Nie einfach abschneiden.
 
-6. BEFUNDE SICHTBAR MACHEN
+6. PROJEKTSTRUKTUR ERFASSEN (die Automatik hat Grenzen — du bist ihr Korrektiv)
+
+   Der Loop findet Projekte automatisch, indem er nach MARKERN sucht (`TODO.md`, `.git`,
+   `pyproject.toml`, … — konfigurierbar). Das setzt voraus, dass ein System diese Konventionen
+   benutzt. Es geht schief, wenn:
+
+   - ein Projekt **keinen Marker** trägt (die Struktur steckt woanders) → es ist unsichtbar,
+   - eine **Kategorie-/Zwischenebene** einen Marker trägt → sie gilt fälschlich als Projekt,
+   - ein Verzeichnis **wie ein Projekt aussieht**, aber keines ist (Archiv, Vorlage, Sandkasten),
+   - mehrere Verzeichnisse **zusammen EIN Projekt** bilden.
+
+   Deine Aufgabe: Prüfe die Erfassung im betrachteten Bereich und **korrigiere sie von Hand**.
+
+       python -m taskplan projects list
+       python -m taskplan projects add <pfad> <root_id> "<begründung>" --by maintainer
+       python -m taskplan projects remove <pfad>
+
+   Regeln dafür:
+   - **Nur mit Beleg eintragen.** Ein Verzeichnis ist ein Projekt, wenn sein Inhalt das zeigt —
+     nicht, weil der Name danach klingt.
+   - **Immer begründen.** Die Notiz sagt, WARUM die Automatik hier nicht reicht. Ohne sie weiß in
+     drei Monaten niemand mehr, ob der Eintrag noch stimmt.
+   - `remove` entfernt **nur den Eintrag**, nichts auf der Platte.
+   - Häufen sich Einträge derselben Art, ist nicht die Registry das Problem, sondern die
+     **Marker-Konfiguration**. Melde das als Befund, statt hundert Einzelfälle nachzutragen.
+
+7. BEFUNDE SICHTBAR MACHEN
    Was du erkennst, aber nicht sicher beheben kannst, gehört in eine Nutzerdatei (z. B. `BEFUNDE.md`)
    — mit Fundort, Beleg und Vorschlag. Keine stillen Reparaturen an Zweifelsfällen, keine stillen
    Auslassungen.

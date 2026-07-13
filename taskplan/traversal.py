@@ -204,9 +204,45 @@ def _find_projects_auto(config: TraversalConfig,
     return projects
 
 
+def discover_projects(config: TraversalConfig, mode: str = "hybrid",
+                      registry_file: str = "",
+                      only_root: Optional[Path] = None) -> List[Project]:
+    """Findet Projekte gemaess dem Discovery-Modus.
+
+    Die Automatik erkennt Projekte an MARKERN. Das setzt voraus, dass ein System
+    diese Konventionen ueberhaupt benutzt — ein anderer Anwender hat vielleicht
+    keine Steuerdateien, eine irrefuehrende Zwischenebene oder ganz andere
+    Dateinamen. Fuer ihn gibt es die manuelle Registry.
+
+    "auto"    nur Marker
+    "manual"  nur Registry
+    "hybrid"  beides, dedupliziert (Default) — die Automatik traegt, die
+              Registry korrigiert. Eingetragene Projekte GEWINNEN bei Dubletten:
+              Wer von Hand etwas eintraegt, hat einen Grund.
+    """
+    from .registry import registered_projects
+
+    found: List[Project] = []
+    if mode in ("auto", "hybrid"):
+        found = find_projects(config, only_root=only_root)
+
+    if mode in ("manual", "hybrid"):
+        manual = registered_projects(registry_file)
+        if only_root is not None:
+            root = Path(only_root).resolve()
+            manual = [p for p in manual
+                      if p.path.resolve() == root or root in p.path.resolve().parents]
+        # Registry gewinnt: eingetragene Pfade ersetzen automatisch gefundene.
+        manual_paths = {p.path.resolve() for p in manual}
+        found = [p for p in found if p.path.resolve() not in manual_paths]
+        found.extend(manual)
+
+    return found
+
+
 def find_projects(config: TraversalConfig,
                   only_root: Optional[Path] = None) -> List[Project]:
-    """Findet alle Arbeitseinheiten unterhalb der konfigurierten Roots.
+    """Findet alle Arbeitseinheiten unterhalb der konfigurierten Roots (Automatik).
 
     Kein unbegrenzter Baumscan: Entweder die Ebenenliste gibt die Tiefe vor, oder
     `max_depth` begrenzt den Auto-Modus.

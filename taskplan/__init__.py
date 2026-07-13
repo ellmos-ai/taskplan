@@ -44,8 +44,17 @@ from .traversal import (  # noqa: F401
     Level,
     Project,
     TraversalConfig,
+    discover_projects,
     find_projects,
     find_roots,
+)
+
+from .registry import (  # noqa: F401
+    RegistryEntry,
+    add_project,
+    load_registry,
+    registered_projects,
+    remove_project,
 )
 
 from .locks import (  # noqa: F401

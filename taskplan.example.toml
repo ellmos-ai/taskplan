@@ -82,6 +82,35 @@ roots_file = "~/OneDrive/_scripts/lock_roots.json"
 
 skip_dirs = ["_archive", "_archiviert", "node_modules", ".venv", "__pycache__"]
 
+# --- WIE werden Projekte gefunden? -----------------------------------------
+# "auto"    nur ueber Marker. Schnell — aber blind fuer Systeme, die diese
+#           Konventionen gar nicht benutzen.
+# "manual"  NUR die gepflegte Liste (projects.json). Fuer Installationen, deren
+#           Struktur sich nicht aus Dateinamen ableiten laesst.
+# "hybrid"  beides, dedupliziert (DEFAULT). Die Automatik traegt, die Registry
+#           korrigiert. Eingetragene Projekte gewinnen bei Konflikten — wer von
+#           Hand eintraegt, hat einen Grund.
+discovery = "hybrid"
+
+registry_file = "~/.taskplan/projects.json"
+
+#     python -m taskplan projects list
+#     python -m taskplan projects add <pfad> <root_id> "<begruendung>" --by maintainer
+#     python -m taskplan projects remove <pfad>
+#
+# Der MAINTAINER pflegt diese Liste automatisch nach: Er prueft, ob die
+# Erfassung stimmt, und traegt fehlende oder falsch erkannte Projekte ein.
+
+# --- MARKER: woran erkennt man ein Projekt? --------------------------------
+# Frei konfigurierbar — ein anderes System hat andere Konventionen.
+# Beispiele: "Backlog.rst", "AUFGABEN.txt", "Makefile", "*.sln", "Cargo.toml"
+markers = ["TODO.md", "ROADMAP.md", "AUFGABEN.md", "AUFGABEN.txt",
+           ".git", "pyproject.toml", "package.json"]
+
+# Tiefe der Auto-Suche. Gesetzt = AUTO-MODUS: das oberste markierte Verzeichnis
+# je Pfad. Noetig, sobald die Roots unterschiedlich tief sind — der Normalfall.
+max_depth = 3
+
 # Die Ebenen sind konfigurierbar, nicht fest verdrahtet. Genau EINE traegt
 # `is_work_unit` — sie bestimmt, was Rotation, Lock-Scope und `project_path`
 # als "Projekt" verstehen.
