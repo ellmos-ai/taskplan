@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestRepositoryHygiene(unittest.TestCase):
+    def setUp(self):
+        if not (ROOT / ".git").exists():
+            self.skipTest("repository hygiene checks require Git metadata")
+
     def check_ignored(self, relative_path: str) -> bool:
         result = subprocess.run(
             ["git", "check-ignore", relative_path],
