@@ -251,6 +251,53 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON rinnsal_tasks(project_path);
 Die bestehende `tags`-Freitextkonvention (`pipeline=…;project=…;source=…`) wird beim ersten Lauf
 **einmalig in die neuen Spalten migriert** und bleibt rückwärtskompatibel befüllt.
 
+### 3.0 Zuweisung: ein Feld, drei Bedeutungen — und ein echter Datenverlust
+
+TASKPLAN hat für Urheberschaft und Zuweisung **ein einziges Feld**: `agent_id`. Darin steht heute
+ein Gemisch:
+
+| Wert | Bedeutung | Anzahl |
+|---|---|---|
+| `scanner` | wer den Task **angelegt** hat | 22 |
+| `sonnet`, `claude-opus`, `opus` | wer ihn **bearbeitet** hat | 15 |
+| `tasksolver` | welche **Rolle** | 1 |
+
+**Drei Bedeutungen, ein Feld — nicht unterscheidbar.** Und schlimmer: Der Wrapper
+`scanner_tasks.py` **überschreibt `agent_id` beim Zuweisen** („agent_id direkt im DB-Eintrag
+aktualisieren + auf active setzen"). In dem Moment, in dem jemand eine Aufgabe übernimmt, ist
+unwiederbringlich verloren, **wer sie angelegt hat.** Die letzte Schreiboperation gewinnt.
+
+**BACH löst das vollständig — und nutzt es real:**
+
+| BACH-Feld | Bedeutung | Reale Werte |
+|---|---|---|
+| `created_by` | wer angelegt hat | `user` 1144, `system` 6, `claude` 5 |
+| `assigned_to` | wem zugewiesen | `user` 847, `bach` 144, `gemini` 67, `CLAUDE` 37 |
+| `delegated_to` | an wen delegiert | `CLAUDE` 37, `GEMINI` 30 |
+| `delegation_status` | Stand der Delegation | `assigned` 10 |
+| `modified_by` | wer zuletzt geändert hat | — |
+
+Das ist gelebter Multi-Agenten-Betrieb: 67 Aufgaben an Gemini, 37 an Claude delegiert.
+
+**Besonders bitter:** Der TASKSOLVER-Prompt verlangt ausdrücklich *„CLAIMEN: Weise die ausgewählten
+TASKPLAN-Tasks erst nach erfolgreichem Lock-Check zu"* — **das Schema kann genau das nicht sauber
+abbilden.** Die API hat nicht einmal eine `assign()`-Funktion, nur `activate()`.
+
+**Zu übernehmen (additiv, aus BACH):**
+
+```sql
+ALTER TABLE rinnsal_tasks ADD COLUMN created_by        TEXT DEFAULT '';  -- unveraenderlich
+ALTER TABLE rinnsal_tasks ADD COLUMN assigned_to       TEXT DEFAULT '';  -- wer fuehrt aus
+ALTER TABLE rinnsal_tasks ADD COLUMN delegation_status TEXT DEFAULT '';  -- open|assigned|accepted|done
+```
+
+`agent_id` bleibt aus Kompatibilitätsgründen erhalten, wird aber beim Migrieren nach `created_by`
+kopiert und **künftig nicht mehr überschrieben**. Neu ist `assign(task_id, to=...)` in der API —
+ohne sie kann der Solver nicht claimen, ohne die Herkunft zu zerstören.
+
+> **Regel:** `created_by` ist unveränderlich. Wer eine Aufgabe übernimmt, schreibt in `assigned_to` —
+> niemals in das Feld, das die Herkunft trägt.
+
 ### 3.1 Die Aufwandsklassen — die Definition entscheidet über alles
 
 | Klasse | Definition | Für TASKSOLVER |
