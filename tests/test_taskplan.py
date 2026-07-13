@@ -3,6 +3,7 @@
 import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from taskplan.client import TaskClient, get_default_db_path
 from taskplan import (
@@ -105,11 +106,27 @@ class TestTaskClient(unittest.TestCase):
 
 
 class TestDefaultDbPath(unittest.TestCase):
+    """Aufloesung des Default-DB-Pfads.
+
+    WICHTIG — Test-Isolation: `get_default_db_path()` liest die Umgebung UND
+    eine eventuell vorhandene Konfigurationsdatei des Benutzers. Ohne das Patchen
+    von `configured_db_path` haengen diese Tests davon ab, ob auf dem Rechner
+    zufaellig eine `~/.taskplan/taskplan.toml` liegt — sie schlugen genau deshalb
+    fehl, als auf dem Entwicklungssystem eine angelegt wurde. Ein Test, der von
+    der realen Benutzerkonfiguration abhaengt, prueft nicht das Modul, sondern
+    den Rechner.
+    """
+
     def setUp(self):
         self._taskplan_db = os.environ.pop("TASKPLAN_DB", None)
         self._rinnsal_db = os.environ.pop("RINNSAL_DB", None)
+        # Benutzerkonfiguration ausblenden -> deterministische Aufloesung
+        self._patcher = mock.patch("taskplan.client.configured_db_path",
+                                   return_value="")
+        self._patcher.start()
 
     def tearDown(self):
+        self._patcher.stop()
         for key, value in (("TASKPLAN_DB", self._taskplan_db),
                            ("RINNSAL_DB", self._rinnsal_db)):
             if value is not None:
@@ -130,6 +147,41 @@ class TestDefaultDbPath(unittest.TestCase):
         path = Path(get_default_db_path())
         self.assertEqual(path.name, "taskplan.db")
         self.assertEqual(path.parent, Path.home() / ".taskplan")
+
+
+class TestConfigPrecedence(unittest.TestCase):
+    """Die Konfiguration steht VOR RINNSAL_DB, aber HINTER TASKPLAN_DB.
+
+    Wer TASKPLAN ausdruecklich konfiguriert, meint das auch — eine geerbte
+    Alt-Variable darf ihn nicht ueberstimmen. Ein explizit gesetztes
+    TASKPLAN_DB dagegen schon (Notausstieg fuer einen einzelnen Lauf).
+    """
+
+    def setUp(self):
+        self._taskplan_db = os.environ.pop("TASKPLAN_DB", None)
+        self._rinnsal_db = os.environ.pop("RINNSAL_DB", None)
+
+    def tearDown(self):
+        for key, value in (("TASKPLAN_DB", self._taskplan_db),
+                           ("RINNSAL_DB", self._rinnsal_db)):
+            if value is not None:
+                os.environ[key] = value
+            else:
+                os.environ.pop(key, None)
+
+    def test_config_beats_rinnsal_db(self):
+        os.environ["RINNSAL_DB"] = "C:/tmp/legacy.db"
+        with mock.patch("taskplan.client.configured_db_path",
+                        return_value="C:/tmp/configured.db"):
+            self.assertEqual(Path(get_default_db_path()),
+                             Path("C:/tmp/configured.db"))
+
+    def test_taskplan_db_beats_config(self):
+        os.environ["TASKPLAN_DB"] = "C:/tmp/explicit.db"
+        with mock.patch("taskplan.client.configured_db_path",
+                        return_value="C:/tmp/configured.db"):
+            self.assertEqual(Path(get_default_db_path()),
+                             Path("C:/tmp/explicit.db"))
 
 
 class TestTasksApi(unittest.TestCase):
