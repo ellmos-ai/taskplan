@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from .markers import MarkerRules
+
 DEFAULT_MARKERS = ("TODO.md", "ROADMAP.md", "AUFGABEN.md", "AUFGABEN.txt",
                    ".git", "pyproject.toml", "package.json")
 
@@ -74,11 +76,21 @@ class TraversalConfig:
     skip_dirs: tuple[str, ...] = DEFAULT_SKIP_DIRS
     max_depth: Optional[int] = None
     markers: tuple[str, ...] = ()
+    # Die reichhaltige Variante: vier Kategorien (Ordnermuster, Dateien,
+    # Subordner, Flagdatei), einzeln schaltbar und per any/all verknuepft.
+    # Ist sie gesetzt, gewinnt sie ueber die einfache `markers`-Liste.
+    rules: Optional["MarkerRules"] = None
 
     def __post_init__(self):
         self.roots = [Path(r) for r in self.roots]
         self.skip_dirs = tuple(self.skip_dirs)
         self.markers = tuple(self.markers)
+
+    def is_project(self, directory: Path) -> bool:
+        """Ist dieses Verzeichnis ein Projekt?"""
+        if self.rules is not None:
+            return self.rules.matches(directory)
+        return _has_marker(directory, self.effective_markers())
 
     @property
     def work_level_index(self) -> int:
@@ -176,7 +188,6 @@ def _find_projects_auto(config: TraversalConfig,
     Sobald ein Verzeichnis als Projekt erkannt ist, wird NICHT weiter hinabgestiegen:
     Ein Unterordner eines Projekts ist Teil davon, kein eigenes Projekt.
     """
-    markers = config.effective_markers()
     max_depth = config.max_depth or 3
     projects: List[Project] = []
 
@@ -194,7 +205,7 @@ def _find_projects_auto(config: TraversalConfig,
                 for child in children:
                     if child.name in config.skip_dirs:
                         continue
-                    if _has_marker(child, markers):
+                    if config.is_project(child):
                         projects.append(Project(path=child, root_id=root.name))
                     else:
                         nxt.append(child)   # nur unmarkierte Zweige weiterverfolgen
@@ -259,8 +270,6 @@ def find_projects(config: TraversalConfig,
     if work_index <= 0:
         return []  # Die Root selbst ist die Arbeitsebene -> keine Projekte darunter
 
-    work_level = config.levels[work_index]
-    markers = work_level.markers or DEFAULT_MARKERS
     projects: List[Project] = []
 
     for root in roots:
@@ -281,7 +290,7 @@ def find_projects(config: TraversalConfig,
                     if child.name in config.skip_dirs:
                         continue
                     if depth == work_index:
-                        if _has_marker(child, markers):
+                        if config.is_project(child):
                             nxt.append(child)
                     else:
                         nxt.append(child)

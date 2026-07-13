@@ -70,7 +70,57 @@ def _projects_command(args: list[str]) -> int:
         print(f"Kein Eintrag gefunden: {args[1]}", file=sys.stderr)
         return 1
 
-    print(f"Unbekannt: {action!r}. Erlaubt: list | add | remove", file=sys.stderr)
+    if action in ("flag", "unflag"):
+        from pathlib import Path
+        from .config import marker_rules
+        from .markers import DEFAULT_FLAG_FILE, clear_flag, set_flag
+
+        if len(args) < 2:
+            print(f"Nutzung: python -m taskplan projects {action} <pfad> [notiz]",
+                  file=sys.stderr)
+            return 2
+        rules = marker_rules()
+        name = rules.flag_file.name if rules else DEFAULT_FLAG_FILE
+        target = Path(args[1])
+        if not target.is_dir():
+            print(f"Kein Verzeichnis: {target}", file=sys.stderr)
+            return 1
+
+        if action == "flag":
+            note = args[2] if len(args) > 2 else ""
+            flag = set_flag(target, name, note=note)
+            print(f"Markiert: {flag}")
+            print("Dieses Verzeichnis gilt jetzt als Projekt — die Flagdatei")
+            print("schlaegt jede Heuristik.")
+            return 0
+
+        if clear_flag(target, name):
+            print(f"Markierung entfernt: {target / name}")
+            return 0
+        print(f"Keine Markierung gefunden: {target / name}", file=sys.stderr)
+        return 1
+
+    if action == "markers":
+        from .config import marker_rules
+        rules = marker_rules()
+        if rules is None:
+            from .config import traversal_config
+            print("Marker-Regeln: (einfache Liste)")
+            print(" ", list(traversal_config().effective_markers()))
+            print()
+            print("Fuer die vier Kategorien einen [traversal.markers]-Abschnitt")
+            print("anlegen — siehe taskplan.example.toml.")
+            return 0
+        print("Marker-Regeln:")
+        print(" ", rules.describe())
+        print()
+        print(f"  Verknuepfung: {rules.combine!r} "
+              f"({'ALLE aktiven Kategorien muessen treffen' if rules.combine == 'all' else 'ein Treffer genuegt'})")
+        print(f"  Flagdatei schlaegt IMMER alles: {rules.flag_file.enabled}")
+        return 0
+
+    print(f"Unbekannt: {action!r}. Erlaubt: list | add | remove | flag | unflag | markers",
+          file=sys.stderr)
     return 2
 
 

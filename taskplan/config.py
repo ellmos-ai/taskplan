@@ -148,6 +148,61 @@ def traversal_config():
         skip_dirs=tuple(section.get("skip_dirs", DEFAULT_SKIP_DIRS)),
         max_depth=max_depth,
         markers=tuple(section.get("markers", []) or []),
+        rules=marker_rules(),
+    )
+
+
+def marker_rules():
+    """Baut die MarkerRules aus `[traversal.markers]`.
+
+    Fehlt der Abschnitt ganz, wird None zurueckgegeben — dann gilt die einfache
+    `markers`-Liste (rueckwaertskompatibel).
+    """
+    from .markers import (COMMON_DIR_PATTERNS, COMMON_MARKER_FILES,
+                          COMMON_MARKER_SUBDIRS, DEFAULT_FLAG_FILE,
+                          DirPatternRule, FileRule, FlagFileRule, GitRule,
+                          MarkerRules, SubdirRule)
+
+    section = (load_config().get("traversal", {}) or {}).get("markers")
+    if not isinstance(section, dict):
+        return None
+
+    def sub(name: str) -> dict:
+        value = section.get(name)
+        return value if isinstance(value, dict) else {}
+
+    dirs = sub("dir_patterns")
+    files = sub("files")
+    subdirs = sub("subdirs")
+    git = sub("git")
+    flag = sub("flag_file")
+
+    return MarkerRules(
+        dir_patterns=DirPatternRule(
+            enabled=bool(dirs.get("enabled", False)),
+            patterns=tuple(dirs.get("patterns", COMMON_DIR_PATTERNS)),
+            require_all=bool(dirs.get("require_all", False)),
+        ),
+        files=FileRule(
+            enabled=bool(files.get("enabled", True)),
+            names=tuple(files.get("names", COMMON_MARKER_FILES)),
+            require_all=bool(files.get("require_all", False)),
+        ),
+        subdirs=SubdirRule(
+            enabled=bool(subdirs.get("enabled", True)),
+            names=tuple(subdirs.get("names", COMMON_MARKER_SUBDIRS)),
+            require_all=bool(subdirs.get("require_all", False)),
+        ),
+        git=GitRule(
+            enabled=bool(git.get("enabled", True)),
+            require_worktree_root=bool(git.get("require_worktree_root", False)),
+        ),
+        flag_file=FlagFileRule(
+            enabled=bool(flag.get("enabled", True)),
+            name=str(flag.get("name", DEFAULT_FLAG_FILE)),
+        ),
+        combine=str(section.get("combine", "any")).lower(),
+        expression=str(section.get("expression", "")),
     )
 
 

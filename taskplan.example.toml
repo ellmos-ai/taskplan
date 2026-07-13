@@ -101,15 +101,90 @@ registry_file = "~/.taskplan/projects.json"
 # Der MAINTAINER pflegt diese Liste automatisch nach: Er prueft, ob die
 # Erfassung stimmt, und traegt fehlende oder falsch erkannte Projekte ein.
 
-# --- MARKER: woran erkennt man ein Projekt? --------------------------------
-# Frei konfigurierbar — ein anderes System hat andere Konventionen.
-# Beispiele: "Backlog.rst", "AUFGABEN.txt", "Makefile", "*.sln", "Cargo.toml"
-markers = ["TODO.md", "ROADMAP.md", "AUFGABEN.md", "AUFGABEN.txt",
-           ".git", "pyproject.toml", "package.json"]
-
 # Tiefe der Auto-Suche. Gesetzt = AUTO-MODUS: das oberste markierte Verzeichnis
 # je Pfad. Noetig, sobald die Roots unterschiedlich tief sind — der Normalfall.
 max_depth = 3
+
+# Einfache Variante (eine Liste, ein Treffer genuegt):
+# markers = ["TODO.md", "CLAUDE.md", ".git", "pyproject.toml"]
+
+
+# ===========================================================================
+# MARKER — woran erkennt man ein Projekt? FUENF Kategorien.
+# ===========================================================================
+# Ein einzelner Marker reicht nie fuer alle Systeme: `TODO.md` liegt auch in
+# Ordnern, die keine Projekte sind. `.git` fehlt bei allem, was nie versioniert
+# wurde. Und manche Strukturen erkennt man nur am Ordnernamen.
+[traversal.markers]
+
+# --- VERKNUEPFUNG ----------------------------------------------------------
+# Kurzform:
+#   combine = "any"   ein Treffer genuegt (grosszuegig — findet viel, auch Falsches)
+#   combine = "all"   jede AKTIVE Kategorie muss treffen (streng)
+combine = "any"
+
+# Voller Ausdruck — UND, ODER, NICHT, Klammern. Gewinnt ueber `combine`.
+# Noetig, sobald "alles oder eines" nicht mehr reicht:
+#
+#   expression = "(dir_patterns AND files) OR git"
+#         Ein GROSS geschriebener Ordner MIT einer Markerdatei — oder ein Repo.
+#
+#   expression = "files AND NOT git"
+#         Nur unversionierte Projekte (z. B. Doku-Ablagen).
+#
+#   expression = "git OR (dir_patterns AND (files OR subdirs))"
+#
+# Erlaubt: dir_patterns, files, subdirs, git, flag_file, AND/OR/NOT
+# (auch UND/ODER/NICHT), Klammern. Ein Tippfehler ist ein FEHLER, kein stilles
+# "trifft nie" — sonst faende der Loop schweigend gar nichts mehr.
+#
+# expression = "(dir_patterns AND files) OR git OR flag_file"
+
+# --- 1. ORDNERMERKMALE -----------------------------------------------------
+# Muster im ORDNERNAMEN. Ein SCHWACHES Signal — gut als Bestandteil einer
+# Kombination, selten allein. Default: aus.
+[traversal.markers.dir_patterns]
+enabled = false
+patterns = ["^\\.", "^[A-Z]"]   # Punkt am Anfang | Grossbuchstabe am Anfang
+require_all = false             # true = ALLE Muster muessen passen
+
+# --- 2. MARKERDATEIEN ------------------------------------------------------
+# CLAUDE.md ist SPEZIFISCHER als TODO.md: Ein TODO.md liegt in jedem zweiten
+# Ordner, eine CLAUDE.md nur dort, wo jemand bewusst einen Agentenkontext
+# angelegt hat.
+[traversal.markers.files]
+enabled = true
+names = ["CLAUDE.md", "AGENTS.md", "TODO.md", "ROADMAP.md",
+         "AUFGABEN.md", "AUFGABEN.txt", "pyproject.toml", "package.json"]
+require_all = false   # true = ALLE Dateien muessen da sein (z. B. CLAUDE.md UND TODO.md)
+
+# --- 3. SUBORDNER ----------------------------------------------------------
+[traversal.markers.subdirs]
+enabled = true
+names = [".claude"]   # `.git` steht NICHT hier — es hat eine eigene Kategorie
+require_all = false
+
+# --- 4. GIT ----------------------------------------------------------------
+# Eigene Kategorie, weil ein Repository ein STARKES Signal ist: Wer `git init`
+# gemacht hat, hat eine Grenze gezogen.
+[traversal.markers.git]
+enabled = true
+# In Worktrees und Submodulen ist `.git` eine DATEI, kein Verzeichnis — beides
+# zaehlt. true = nur echte Repos, keine Worktrees/Submodule.
+require_worktree_root = false
+
+# --- 5. FLAGDATEI (der letzte Automatik-Fallback) ---------------------------
+# Wo keine Heuristik greift: eine Datei ablegen, und die Sache ist entschieden.
+# Sie schlaegt JEDE Heuristik — auch combine = "all".
+#
+#     python -m taskplan projects flag <pfad> "Begruendung"
+#     python -m taskplan projects unflag <pfad>
+#
+# Bewusst abschaltbar: Manche Nutzer wollen keine fremden Dateien in ihren
+# Projekten. Fuer sie bleibt der Handeintrag in der Registry (siehe oben).
+[traversal.markers.flag_file]
+enabled = true
+name = ".taskplan-project"    # frei waehlbar, z. B. "itsa.project"
 
 # Die Ebenen sind konfigurierbar, nicht fest verdrahtet. Genau EINE traegt
 # `is_work_unit` — sie bestimmt, was Rotation, Lock-Scope und `project_path`
