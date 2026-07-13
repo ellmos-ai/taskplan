@@ -149,6 +149,64 @@ Damit ist sie (a) nicht ohne Datei-Edit änderbar, (b) nicht pro Rolle differenz
 Maintainer-Durchlauf braucht kein Denkmodell) und (c) nicht nutzerneutral — ein anderer Anwender
 erbt Lukas' Modellwahl. Gehört als Achse in die Config (§7).
 
+### 1.8b Die Rinnsal-Ablösung: datentechnisch trivial, codetechnisch der eigentliche Aufwand
+
+Rinnsal soll durch drei gekapselte Module ersetzt werden — **USMC** (Sessions + kuratiertes Memory),
+**Gardener** (inhaltliche Suche über alles) und **TASKPLAN** (Aufgaben). Der geprüfte Ist-Stand:
+
+**Zu migrieren ist praktisch nichts.**
+
+| Datenbank | Memory/Sessions | Tasks |
+|---|---|---|
+| `~/.rinnsal/scanner_tasks.db` | — | **38 Zeilen** (echte Nutzdaten) |
+| `.OS/rinnsal/rinnsal.db` (im Repo, März) | **0 / 0 / 0 / 0** | 0 |
+| `~/.rinnsal/rinnsal.db` (laut Config der Default) | **existiert überhaupt nicht** | — |
+| `~/.usmc/usmc_memory.db` | **0 Zeilen** | — |
+| Gardeners `gardener.db` + `user.db` | **0 Zeilen** (nie geseedet) | — |
+
+**Rinnsals Memory-Subsystem wurde auf diesem System nie benutzt.** Sämtliche `usmc_*`-Tabellen sind
+in *allen* Datenbanken leer. Die einzigen echten Nutzdaten sind die **38 Tasks** — und selbst die
+brauchen keine Migration, weil TASKPLAN den Tabellennamen `rinnsal_tasks` bewusst kompatibel hält
+(`client.py:9-11`). Es ist ein **Consumer-Umschwenk, keine Datenwanderung**.
+
+**Eine verbreitete Annahme ist falsch herum:** USMC übernimmt nichts *aus* Rinnsal — **Rinnsal hat
+von USMC abgeschrieben.** `rinnsal/memory/__init__.py:5`: *„Based on USMC."* Rinnsal **baut das
+USMC-Schema nach**, statt das Modul zu importieren; daher heißen seine Tabellen `usmc_facts`,
+`usmc_sessions` usw. Es sind zwei Kopien desselben Schemas. Rinnsals eigene TODO benennt das offen
+(*„USMC importieren statt duplizieren — vermeidet Schema-Drift"*), Checkbox offen.
+
+**Stand der Dreiteilung:**
+
+| Modul | Extraktion | Rinnsal-Seam | Daten |
+|---|---|---|---|
+| **TASKPLAN** | ✅ erledigt 2026-07-11 | ✅ `rinnsal/tasks/client.py` | 38 Zeilen |
+| **USMC** | ⚠️ Modul existiert — aber Rinnsal dupliziert es weiter | ❌ offen | 0 |
+| **GARDENER** | ⚠️ Konzeptionell fertig, **außer Betrieb** | — | 0 |
+
+**Gardener ist der Engpass.** Sein `pip install -e` ist gebrochen (einer der drei, die der
+Pfadwechsel am 2026-07-11 zerlegt hat) — `import gardener` löst versehentlich auf den *Datenordner*
+`~/gardener` auf statt auf den Code. Beide DBs sind leer, `seed.py` lief nie. Der geplante
+Cross-Source-Index (systemweite Suche über `bach.db`, Claude-Memories, `.remember`) ist vollständig
+beschlossen — und zu **null Prozent** implementiert.
+
+**Der eigentliche Aufwand liegt im Code, nicht in den Daten:**
+
+1. Rinnsals `memory/`-Duplikat durch einen echten `usmc`-Import ersetzen (offene Checkbox).
+2. `usmc` überhaupt erst pip-installieren, Gardeners Install reparieren.
+3. Den **einzigen echten Import-Consumer** umhängen: `ellmos-stack/services/telegram_gateway.py`
+   (`from rinnsal import memory` / `import tasks`).
+
+> **Warnung, die ein Deployment sonst zerlegt:** `MODULE-CONSUMER-INVENTORY.md` behauptet, `usmc`
+> und `taskplan` seien regulär installiert. **Installiert ist nur `taskplan`.** `usmc` und `rinnsal`
+> sind es *nicht* — `from rinnsal import memory` würde auf einem frischen Interpreter schlicht
+> fehlschlagen. Das Inventar ist falsch und gehört korrigiert.
+
+**Konsequenz für TASKPLAN (dieses Konzept):** Der Umbau ist von der Rinnsal-Ablösung **entkoppelt**.
+TASKPLAN ist bereits extrahiert; es muss nur (a) den DB-Split beheben (§1.8) und (b) den
+Tabellennamen `rinnsal_tasks` **weiterhin kompatibel halten**, solange `ellmos-unified-gui` und
+`ellmos-homebase-mcp` direkt darauf lesen. Ein Umbenennen der Tabelle wäre ein eigener, koordinierter
+Schritt — **nicht Teil dieses Umbaus.**
+
 ### 1.9 Keine Konfiguration für Tiefe oder Modus
 
 Es gibt **keinen einzigen Schalter**. Tiefe und Verhalten stecken ausschließlich in Prompt-Prosa und
