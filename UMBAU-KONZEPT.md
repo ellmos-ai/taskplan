@@ -138,18 +138,7 @@ Schreibvorgänge in einer gespaltenen Datenbank**: Tasks landen in einer DB, die
 der bestehende Bestand ist für den Schreiber unsichtbar. Sollte unabhängig vom übrigen Umbau sofort
 geschlossen werden.
 
-### 1.10 Nebenbefund: Das Modell ist im Starter festgenagelt
-
-`START-TASKSOLVER.bat` und `START-TASKWRITER.bat` starten beide fest mit `--model claude-sonnet-5`.
-Das Modell selbst ist korrekt (Sonnet 5 und Opus 4.8 sind die gesetzten Zielmodelle) — **das Problem
-ist die Verdrahtung**: Die Modellwahl steckt hartcodiert in zwei `.bat`-Dateien der Installation,
-statt in der Modul-Konfiguration zu stehen.
-
-Damit ist sie (a) nicht ohne Datei-Edit änderbar, (b) nicht pro Rolle differenzierbar (ein leichter
-Maintainer-Durchlauf braucht kein Denkmodell) und (c) nicht nutzerneutral — ein anderer Anwender
-erbt Lukas' Modellwahl. Gehört als Achse in die Config (§7).
-
-### 1.8b Die Rinnsal-Ablösung: datentechnisch trivial, codetechnisch der eigentliche Aufwand
+### 1.9 Die Rinnsal-Ablösung: datentechnisch trivial, codetechnisch der eigentliche Aufwand
 
 Rinnsal soll durch drei gekapselte Module ersetzt werden — **USMC** (Sessions + kuratiertes Memory),
 **Gardener** (inhaltliche Suche über alles) und **TASKPLAN** (Aufgaben). Der geprüfte Ist-Stand:
@@ -207,11 +196,22 @@ Tabellennamen `rinnsal_tasks` **weiterhin kompatibel halten**, solange `ellmos-u
 `ellmos-homebase-mcp` direkt darauf lesen. Ein Umbenennen der Tabelle wäre ein eigener, koordinierter
 Schritt — **nicht Teil dieses Umbaus.**
 
-### 1.9 Keine Konfiguration für Tiefe oder Modus
+### 1.10 Keine Konfiguration für Tiefe oder Modus
 
 Es gibt **keinen einzigen Schalter**. Tiefe und Verhalten stecken ausschließlich in Prompt-Prosa und
 der Rotationstabelle. `scan_projects.py` hätte ein `--max-depth` (Default 4) — die Loops rufen es
 nicht auf; `TASKWRITER.txt` Z. 45 verbietet sogar „keinen unbeschränkten Baumscan".
+
+### 1.11 Nebenbefund: Das Modell ist im Starter festgenagelt
+
+`START-TASKSOLVER.bat` und `START-TASKWRITER.bat` starten beide fest mit `--model claude-sonnet-5`.
+Das Modell selbst ist korrekt (Sonnet 5 und Opus 4.8 sind die gesetzten Zielmodelle) — **das Problem
+ist die Verdrahtung**: Die Modellwahl steckt hartcodiert in zwei `.bat`-Dateien der Installation,
+statt in der Modul-Konfiguration zu stehen.
+
+Damit ist sie (a) nicht ohne Datei-Edit änderbar, (b) nicht pro Rolle differenzierbar (ein leichter
+Maintainer-Durchlauf braucht kein Denkmodell) und (c) nicht nutzerneutral — ein anderer Anwender
+erbt Lukas' Modellwahl. Gehört als Achse in die Config (§7).
 
 ---
 
@@ -495,7 +495,7 @@ read_always_allowed = true
 create_allowed      = true   # neue Datei in gelocktem Ordner
 modify_requires_free_scope = true
 
-# Modellwahl gehoert ins Modul, nicht in den Starter (§1.10) — pro Rolle
+# Modellwahl gehoert ins Modul, nicht in den Starter (§1.11) — pro Rolle
 # einstellbar, mit neutralem Default. Die Starter lesen sie nur noch aus.
 [models]
 default    = "claude-sonnet-5"
@@ -642,8 +642,9 @@ jemand die Projektebene formalisiert haben, bevor jemand sie abarbeiten kann.
 5. **17 Lock-Roots vs. 13 Rotations-Pipelines** (§7): dieselben Orte mit unterschiedlichem Zweck —
    oder vier Bereiche, die nie in die Rotation aufgenommen wurden und deshalb heute unbearbeitet
    bleiben?
-6. **Modellzuordnung pro Rolle** (§7, `[models]`): Der Vorschlag gibt dem TASKSOLVER Opus 4.8
-   (er setzt um und braucht Urteil), Writer und Maintainer Sonnet 5. Passt die Aufteilung?
+6. **Welche Rolle bekommt welches Modell?** (§7, `[models]`) — offen ist **allein die Zuordnung**,
+   nicht die Modellwahl selbst (siehe unten). Vorschlag: TASKSOLVER auf Opus 4.8 (er setzt um und
+   braucht Urteil), TASKWRITER und MAINTAINER auf Sonnet 5. Passt die Aufteilung?
 
 ### Bereits entschieden (2026-07-13, nicht mehr offen)
 
@@ -652,5 +653,8 @@ jemand die Projektebene formalisiert haben, bevor jemand sie abarbeiten kann.
   arbeiten — deshalb existiert die Unterscheidung.
 - **Ebenen:** nicht fest verdrahtet, sondern als konfigurierbare Ebenenliste
   (Root → *optional* Slot → Projekt), mit genau einer Arbeitsebene (§4.1).
-- **Modelle:** Sonnet 5 und Opus 4.8 sind gesetzt; Wahl gehört in die Modul-Config, nicht in die
-  Starter (§1.10, §7).
+- **Welche Modelle:** Sonnet 5 und Opus 4.8 sind gesetzt. **Wo die Wahl steht:** in der Modul-Config,
+  nicht im Starter (§1.11, §7). Offen bleibt allein die Zuordnung pro Rolle — Frage 6.
+- **Rollen und Modi:** einzeln abschaltbar; `combined` legt sie in *einem* Worker zusammen.
+  Default: alle drei aktiv und getrennt (§7).
+- **Aufgabenquellen und Speicher:** beides konfigurierbar statt hartcodiert (§7, §7.1).
