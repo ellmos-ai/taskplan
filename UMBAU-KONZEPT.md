@@ -219,38 +219,45 @@ Der vom Nutzer beschriebene Ablauf — **wörtlich als Spezifikation**, der Rüc
 zwischen zwei Deep-Dives ist Teil der Spec, kein Overhead:
 
 ```
-                 ┌──────────────────────────────────────┐
-                 │  SURFACE SWEEP                       │
-                 │  alle Roots: Root-Aufgaben erkennen  │
-                 │  + easy/medium davon abarbeiten      │
-                 └──────────────┬───────────────────────┘
-                                │ Oberfläche sauber
+        ┌────────────────────────────────────────────────┐
+        │  SURFACE SWEEP (alle Roots)                    │
+        │  Root-Aufgaben erkennen + easy abarbeiten       │
+        └───────────────────────┬────────────────────────┘
                                 ▼
-                 ┌──────────────────────────────────────┐
-                 │  DEEP DIVE in EINE Root              │
-                 │  (die am längsten nicht getauchte)   │
-                 │                                      │
-                 │  easy-Modus:  solange easy da        │
-                 │       ↓  keine easy mehr             │
-                 │  harder-Modus: medium abarbeiten     │
-                 └──────────────┬───────────────────────┘
-                                │ Root erschöpft
+        ┌────────────────────────────────────────────────┐
+        │  DEEP DIVE — EASY, in EINE Root                │
+        │  leichte Aufgaben in den Projekten dieser Root │
+        └───────────────────────┬────────────────────────┘
+                                │ keine easy mehr in dieser Root
                                 ▼
-                        zurück zum SURFACE SWEEP
+                    ZURÜCK ZUM SURFACE SWEEP
                                 │
                                 ▼
-                        DEEP DIVE in die NÄCHSTE Root
+        ┌────────────────────────────────────────────────┐
+        │  DEEP DIVE — EASY, in die NÄCHSTE Root         │
+        └───────────────────────┬────────────────────────┘
                                 │
-                               ...
+                               ...  bis KEINE Root mehr easy hat
+                                ▼
+        ╔════════════════════════════════════════════════╗
+        ║  ERST JETZT: HARDER-DURCHGANG (medium)         ║
+        ║  gleiche Reihenfolge, gleiche Rücksprünge      ║
+        ╚════════════════════════════════════════════════╝
 ```
 
-> ⚠️ **Diese Zeichnung trifft eine Annahme, die zu bestätigen ist (siehe §10, Punkt 5).**
-> Die Vorgabe lautete: „wenn eine Pipeline keine leichten mehr hat → **wieder gesamter
-> Oberflächenscan**". Wörtlich gelesen hieße das: **keine easy mehr → sofort zurück an die
-> Oberfläche**, und der harder-Modus käme erst in einer späteren Runde. Die Zeichnung oben eskaliert
-> stattdessen easy→harder **innerhalb derselben Root**, bevor sie zurückspringt.
-> Beide Lesarten sind vertretbar; die Zeichnung folgt der zweiten, weil sie den Kontextwechsel
-> spart. **Das ist eine Entscheidung, keine Ableitung** — sie gehört bestätigt oder korrigiert.
+**Die Regel, die das erzwingt — und ihre Begründung (Nutzervorgabe 2026-07-13):**
+
+> **Leichte Aufgaben werden global erschöpft, bevor irgendwo eine mittlere angefasst wird.**
+> Nicht easy→harder *innerhalb* einer Root, sondern easy über **alle** Roots, dann harder über alle.
+
+Der Grund ist nicht Ordnungsliebe, sondern **Entlastung**: Leichte, sofort abarbeitbare Aufgaben
+nehmen genau denjenigen Ballast ab, die gerade tief in einem speziellen Thema eines Projekts
+stecken. Eine liegengebliebene Kleinigkeit in Projekt A ist wertvoller abgeräumt als eine mittlere
+Aufgabe in Projekt B vertieft — **deshalb** existiert die Unterscheidung easy/harder überhaupt.
+
+Daraus folgt für den Selektor: `effort` ist die **primäre** Sortierdimension, die Root-Rotation die
+sekundäre. Ein `medium`-Task ist erst wählbar, wenn systemweit **kein** `easy`-Task mehr offen und
+erreichbar ist (nicht gelockt, nicht blockiert).
 
 **Kernfunktion im Package (deterministisch, ohne LLM, unit-testbar):**
 
@@ -262,20 +269,45 @@ def next_bundle(config: LoopConfig, db: TaskClient, locks: LockView) -> Bundle |
 Gibt der Selektor `None` zurück, endet der Durchlauf **ehrlich als Leerlauf** — statt dass das
 Modell sich Arbeit sucht, um den Loop zu füllen.
 
-### 4.1 Was ist überhaupt ein „Projekt"? (die fehlende Definition)
+### 4.1 Die Ebenen — nutzerneutral konfigurierbar, nicht fest verdrahtet
 
-Bisher nirgends definiert — deshalb hier, und zwar **strukturell statt per Namensliste**:
+Bisher gibt es **gar keine** Definition von „Pipeline" vs. „Projekt" — die Begriffe werden
+konflatiert (§1.1). Der Umbau definiert sie nicht *inhaltlich* (das wäre wieder Lukas' Installation
+im Modul), sondern **strukturell als konfigurierbare Ebenen**:
+
+| Ebene | Bedeutung | Woher |
+|---|---|---|
+| **Root** | Einstiegspunkt der Traversierung (hier: Pipeline-Überordner / Slot) | Umgebungs-Config |
+| **Projekt** | Arbeitseinheit unterhalb einer Root | Erkannt über **Marker** |
 
 > Ein **Projekt** ist ein Verzeichnis unterhalb einer Root, das mindestens einen **Projekt-Marker**
-> trägt. Marker sind konfigurierbar, Default: eine eigene Steuerdatei (`TODO.md`, `ROADMAP.md`,
-> `AUFGABEN.*`), ein `.git`-Verzeichnis, oder ein Build-/Paket-Manifest (`pyproject.toml`,
+> trägt. Marker sind konfigurierbar; Default: eine eigene Steuerdatei (`TODO.md`, `ROADMAP.md`,
+> `AUFGABEN.*`), ein `.git`-Verzeichnis oder ein Build-/Paket-Manifest (`pyproject.toml`,
 > `package.json`, …).
->
-> Eine **Root** (bisher „Pipeline") ist ein konfigurierter Einstiegspunkt der Traversierung.
-> Roots werden **nicht** vom Modul definiert, sondern von der Umgebung.
 
-Damit kann der Selektor Projekte **finden**, statt sie in einer gepflegten Liste nachschlagen zu
-müssen — und das Modul bleibt frei von den Namen einer konkreten Installation.
+**Die Ebenenzahl ist selbst eine Einstellung, kein Gesetz.** Manche Installationen haben
+Root → Projekt; andere Root → Slot → Unterprojekt; eine flache Installation hat nur Roots. Das
+Modell ist deshalb eine **Liste von Ebenen**, nicht ein fest verdrahtetes Zweierpaar:
+
+```toml
+# Beispiel: dreistufig (Überordner → Slot → Unterprojekt)
+[[traversal.levels]]
+name    = "root"        # Einstiegspunkte aus dem Roots-Inventar
+[[traversal.levels]]
+name    = "slot"        # Zwischenebene, rein gruppierend
+markers = []            # keine Marker noetig — jedes Unterverzeichnis ist ein Slot
+[[traversal.levels]]
+name    = "project"     # die eigentliche Arbeitseinheit
+markers = ["TODO.md", "ROADMAP.md", ".git", "pyproject.toml"]
+is_work_unit = true     # <- auf DIESER Ebene wird gearbeitet und gelockt
+```
+
+Wer nur zwei Ebenen braucht, lässt `slot` weg. Wer vier braucht, hängt eine an. **Genau eine Ebene
+trägt `is_work_unit = true`** — sie bestimmt, was ein „Projekt" im Sinne von Rotation, Lock-Scope
+und `project_path` ist.
+
+Damit **findet** der Selektor Projekte, statt sie in einer handgepflegten Liste nachschlagen zu
+müssen — und das Modul bleibt frei von den Namen und der Tiefe einer konkreten Installation.
 
 ---
 
@@ -439,12 +471,18 @@ jemand die Projektebene formalisiert haben, bevor jemand sie abarbeiten kann.
    faktisch ausgenommen. Sollen sie im Deep-Mode regulär mitlaufen?
 4. **Maintainer-Autonomie:** Darf er Dateien eigenständig verschieben, oder nur vorschlagen und der
    Nutzer bestätigt? (Vorschlag: verschieben ja, aber nur reversibel und mit Beleg für den Zielort.)
-5. **Der harder-Modus — wo läuft er?** (§4) Wörtlich hieße die Vorgabe: keine easy mehr → **sofort
-   zurück an die Oberfläche**, harder erst in einer späteren Runde. Der Entwurf eskaliert stattdessen
-   easy→harder **in derselben Root**, bevor er zurückspringt (spart den Kontextwechsel).
-   **Welche Lesart gilt?**
-6. **17 Lock-Roots vs. 13 Rotations-Pipelines** (§7): dieselben Orte mit unterschiedlichem Zweck —
+5. **17 Lock-Roots vs. 13 Rotations-Pipelines** (§7): dieselben Orte mit unterschiedlichem Zweck —
    oder vier Bereiche, die nie in die Rotation aufgenommen wurden und deshalb heute unbearbeitet
    bleiben?
-7. **Modellzuordnung pro Rolle** (§7, `[models]`): Der Vorschlag gibt dem TASKSOLVER Opus 4.8
+6. **Modellzuordnung pro Rolle** (§7, `[models]`): Der Vorschlag gibt dem TASKSOLVER Opus 4.8
    (er setzt um und braucht Urteil), Writer und Maintainer Sonnet 5. Passt die Aufteilung?
+
+### Bereits entschieden (2026-07-13, nicht mehr offen)
+
+- **Harder-Modus:** easy wird **global über alle Roots** erschöpft, erst dann läuft der
+  medium-Durchgang (§4). Begründung: leichte Aufgaben entlasten die, die tief in Spezialthemen
+  arbeiten — deshalb existiert die Unterscheidung.
+- **Ebenen:** nicht fest verdrahtet, sondern als konfigurierbare Ebenenliste
+  (Root → *optional* Slot → Projekt), mit genau einer Arbeitsebene (§4.1).
+- **Modelle:** Sonnet 5 und Opus 4.8 sind gesetzt; Wahl gehört in die Modul-Config, nicht in die
+  Starter (§1.10, §7).
