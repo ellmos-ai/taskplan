@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from datetime import datetime
 
+from .config import configured_db_path
+
 
 TASK_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS rinnsal_tasks (
@@ -47,8 +49,63 @@ CREATE INDEX IF NOT EXISTS idx_tasks_priority ON rinnsal_tasks(priority);
 CREATE INDEX IF NOT EXISTS idx_tasks_agent ON rinnsal_tasks(agent_id);
 """
 
+# Schema v2 (2026-07-14): rein additiv. Bestehende Spalten bleiben unveraendert,
+# damit die Direktleser der Tabelle (ellmos-unified-gui, ellmos-homebase-mcp,
+# scanner_tasks.py) unberuehrt weiterlaufen.
+#
+#   effort/scope      -> ohne sie ist "erst leichte, dann mittlere" nicht erzwingbar,
+#                        sondern nur erbittbar (Prompt-Prosa statt Gate)
+#   project_path/root -> lagen bisher nur als Freitext in `tags` und waren nicht abfragbar
+#   created_by/...    -> agent_id trug DREI Bedeutungen (Anleger/Bearbeiter/Rolle) und
+#                        wurde beim Zuweisen ueberschrieben; die Herkunft ging verloren
+SCHEMA_V2_COLUMNS = {
+    "project_path": "TEXT DEFAULT ''",
+    "root_id": "TEXT DEFAULT ''",
+    "effort": "TEXT DEFAULT ''",
+    "scope": "TEXT DEFAULT 'local'",
+    "source": "TEXT DEFAULT ''",
+    "created_by": "TEXT DEFAULT ''",
+    "assigned_to": "TEXT DEFAULT ''",
+    "delegation_status": "TEXT DEFAULT ''",
+}
+
+SCHEMA_V2_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_tasks_effort ON rinnsal_tasks(effort);
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON rinnsal_tasks(project_path);
+CREATE INDEX IF NOT EXISTS idx_tasks_root ON rinnsal_tasks(root_id);
+"""
+
 VALID_STATUSES = ('open', 'active', 'done', 'cancelled')
 VALID_PRIORITIES = ('critical', 'high', 'medium', 'low')
+
+# large/special sind bewusst KEINE autonom loesbaren Klassen — das Gate sitzt im
+# Selektor, nicht hier. Der Client speichert nur, was gueltig ist.
+VALID_EFFORTS = ('easy', 'medium', 'large', 'special')
+VALID_SCOPES = ('local', 'central')
+
+# Reihenfolge der Spalten in jedem SELECT — eine Quelle, damit _row_to_dict
+# nicht stillschweigend verrutscht, wenn jemand eine Spalte ergaenzt.
+_SELECT_COLUMNS = (
+    "id, title, description, status, priority, agent_id, tags, "
+    "created_at, updated_at, done_at, "
+    "project_path, root_id, effort, scope, source, "
+    "created_by, assigned_to, delegation_status"
+)
+
+
+def _parse_tag_string(tags: str) -> Dict[str, str]:
+    """Zerlegt die alte Freitext-Konvention `pipeline=.AI;project=C:/x;source=TODO.md`.
+
+    Nur `key=value`-Paare werden erkannt; freie Tags ohne `=` werden ignoriert.
+    Der erste Treffer gewinnt, damit ein doppelter Schluessel nicht still den
+    frueheren Wert ueberschreibt.
+    """
+    parsed: Dict[str, str] = {}
+    for part in tags.split(";"):
+        key, sep, value = part.partition("=")
+        if sep and key.strip() and key.strip() not in parsed:
+            parsed[key.strip()] = value.strip()
+    return parsed
 
 
 def get_default_db_path() -> str:
@@ -56,18 +113,59 @@ def get_default_db_path() -> str:
 
     Reihenfolge:
     1. ENV TASKPLAN_DB
-    2. ENV RINNSAL_DB (Kompatibilitaet mit bestehenden Rinnsal-Setups)
-    3. ~/.taskplan/taskplan.db (Verzeichnis wird bei Bedarf angelegt)
+    2. Konfigurationsdatei, `[storage] path` (siehe taskplan.config)
+    3. ENV RINNSAL_DB (Kompatibilitaet mit bestehenden Rinnsal-Setups)
+    4. ~/.taskplan/taskplan.db (Verzeichnis wird bei Bedarf angelegt)
 
     Explizit uebergebene Pfade (db_path-Parameter) haben immer Vorrang und
     laufen nicht durch diese Funktion.
+
+    Die Konfigurationsdatei steht bewusst VOR RINNSAL_DB: Wer TASKPLAN
+    ausdruecklich konfiguriert, meint das auch — eine geerbte Alt-Variable
+    darf ihn nicht ueberstimmen.
     """
-    env_path = os.environ.get("TASKPLAN_DB", "") or os.environ.get("RINNSAL_DB", "")
+    env_path = os.environ.get("TASKPLAN_DB", "")
     if env_path:
         return str(Path(env_path).expanduser())
+
+    configured = configured_db_path()
+    if configured:
+        return configured
+
+    legacy = os.environ.get("RINNSAL_DB", "")
+    if legacy:
+        return str(Path(legacy).expanduser())
+
     taskplan_dir = Path.home() / ".taskplan"
     taskplan_dir.mkdir(exist_ok=True)
     return str(taskplan_dir / "taskplan.db")
+
+
+def count_tasks_in(db_path: str | Path) -> Optional[int]:
+    """Zaehlt die Tasks in einer DB, ohne sie anzulegen oder zu veraendern.
+
+    Gibt None zurueck, wenn die Datei fehlt, leer ist oder keine Task-Tabelle
+    hat. Oeffnet strikt read-only (`mode=ro`), damit die Pruefung selbst keine
+    Datei und keine WAL-Reste erzeugt — genau so entstehen sonst
+    Geisterdatenbanken.
+    """
+    path = Path(db_path)
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return None
+    except OSError:
+        return None
+    uri = "file:{}?mode=ro".format(path.as_posix())
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+        try:
+            row = conn.execute(
+                "SELECT count(*) FROM rinnsal_tasks").fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
 
 
 class TaskClient:
@@ -116,30 +214,109 @@ class TaskClient:
         conn = self._get_conn()
         try:
             conn.executescript(TASK_SCHEMA_SQL)
+            self._migrate_to_v2(conn)
             conn.commit()
         finally:
             if not self._is_memory:
                 self._close_conn(conn)
+
+    def _migrate_to_v2(self, conn: sqlite3.Connection) -> None:
+        """Ergaenzt die v2-Spalten. Additiv, idempotent, ohne Datenaenderung.
+
+        Bewusst NUR Struktur: Vorhandene Zeilen werden nicht angefasst. Das
+        Uebertragen der alten `tags`-Konvention in die neuen Spalten ist ein
+        Schreibzugriff auf Produktionsdaten und laeuft deshalb ausschliesslich
+        auf ausdruecklichen Aufruf von `backfill_from_tags()` — nie beim Oeffnen.
+        """
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(rinnsal_tasks)")}
+        for column, definition in SCHEMA_V2_COLUMNS.items():
+            if column not in existing:
+                conn.execute(
+                    f"ALTER TABLE rinnsal_tasks ADD COLUMN {column} {definition}")
+        conn.executescript(SCHEMA_V2_INDEXES)
+
+    def backfill_from_tags(self) -> int:
+        """Uebertraegt die alte `tags`-Konvention in die v2-Spalten.
+
+        Alt: `pipeline=.AI;project=C:/p/x;source=TODO.md` als Freitext.
+        Neu: root_id / project_path / source als abfragbare Spalten.
+
+        `tags` bleibt unveraendert erhalten — die Direktleser der Tabelle
+        (unified-gui, homebase-mcp, scanner_tasks.py) lesen es weiterhin.
+        Ebenso wird `created_by` aus `agent_id` gesetzt, solange es leer ist:
+        beim Anlegen war `agent_id` der Anleger.
+
+        Returns:
+            Zahl der geaenderten Zeilen.
+        """
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, tags, agent_id, project_path, root_id, source, created_by "
+                "FROM rinnsal_tasks").fetchall()
+            changed = 0
+            now = datetime.now().isoformat()
+            for task_id, tags, agent_id, project_path, root_id, source, created_by in rows:
+                parsed = _parse_tag_string(tags or "")
+                updates = {}
+                # Nie ueberschreiben, was schon gesetzt ist — der Backfill ist
+                # eine Ergaenzung, keine Korrektur.
+                if not root_id and parsed.get("pipeline"):
+                    updates["root_id"] = parsed["pipeline"]
+                if not project_path and parsed.get("project"):
+                    updates["project_path"] = parsed["project"]
+                if not source and parsed.get("source"):
+                    updates["source"] = parsed["source"]
+                if not created_by and agent_id:
+                    updates["created_by"] = agent_id
+                if not updates:
+                    continue
+                fields = ", ".join(f"{k} = ?" for k in updates)
+                conn.execute(
+                    f"UPDATE rinnsal_tasks SET {fields}, updated_at = ? WHERE id = ?",
+                    (*updates.values(), now, task_id))
+                changed += 1
+            conn.commit()
+            return changed
+        finally:
+            self._close_conn(conn)
 
     def add(
         self,
         title: str,
         description: str = "",
         priority: str = "medium",
-        tags: str = ""
+        tags: str = "",
+        effort: str = "",
+        scope: str = "local",
+        project_path: str = "",
+        root_id: str = "",
+        source: str = ""
     ) -> Dict:
-        """Erstellt einen neuen Task."""
+        """Erstellt einen neuen Task.
+
+        `effort` darf leer bleiben (= unklassifiziert). Der Selektor behandelt
+        unklassifizierte Aufgaben konservativ, statt sie faelschlich als leicht
+        einzustufen.
+        """
         if priority not in VALID_PRIORITIES:
             raise ValueError(f"priority muss einer von {VALID_PRIORITIES} sein")
+        if effort and effort not in VALID_EFFORTS:
+            raise ValueError(f"effort muss einer von {VALID_EFFORTS} sein (oder leer)")
+        if scope not in VALID_SCOPES:
+            raise ValueError(f"scope muss einer von {VALID_SCOPES} sein")
 
         now = datetime.now().isoformat()
         conn = self._get_conn()
         try:
             cursor = conn.execute("""
                 INSERT INTO rinnsal_tasks
-                    (title, description, status, priority, agent_id, tags, created_at, updated_at)
-                VALUES (?, ?, 'open', ?, ?, ?, ?, ?)
-            """, (title, description, priority, self.agent_id, tags, now, now))
+                    (title, description, status, priority, agent_id, tags,
+                     created_at, updated_at,
+                     project_path, root_id, effort, scope, source, created_by)
+                VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (title, description, priority, self.agent_id, tags, now, now,
+                  project_path, root_id, effort, scope, source, self.agent_id))
             conn.commit()
             return {
                 'id': cursor.lastrowid,
@@ -150,7 +327,36 @@ class TaskClient:
                 'agent_id': self.agent_id,
                 'tags': tags,
                 'created_at': now,
+                'project_path': project_path,
+                'root_id': root_id,
+                'effort': effort,
+                'scope': scope,
+                'source': source,
+                'created_by': self.agent_id,
+                'assigned_to': '',
+                'delegation_status': '',
             }
+        finally:
+            self._close_conn(conn)
+
+    def assign(self, task_id: int, to: str, status: str = "assigned") -> bool:
+        """Weist einen Task einem Ausfuehrenden zu.
+
+        Schreibt AUSSCHLIESSLICH in `assigned_to`/`delegation_status`.
+        `created_by` und `agent_id` bleiben unberuehrt — sonst ginge verloren,
+        wer den Task angelegt hat (genau der Fehler des alten Wrappers, der
+        beim Zuweisen `agent_id` ueberschrieb).
+        """
+        now = datetime.now().isoformat()
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                "UPDATE rinnsal_tasks "
+                "SET assigned_to = ?, delegation_status = ?, updated_at = ? "
+                "WHERE id = ?",
+                (to, status, now, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             self._close_conn(conn)
 
@@ -159,9 +365,19 @@ class TaskClient:
         status: Optional[str] = None,
         priority: Optional[str] = None,
         include_done: bool = False,
-        limit: int = 50
+        limit: int = 50,
+        effort: Optional[str] = None,
+        scope: Optional[str] = None,
+        project_path: Optional[str] = None,
+        root_id: Optional[str] = None,
+        assigned_to: Optional[str] = None
     ) -> List[Dict]:
-        """Listet Tasks auf."""
+        """Listet Tasks auf.
+
+        Die Filter auf effort/scope/project/root sind das, was der Selektor
+        braucht, um "erst alle leichten, dann die mittleren" durchzusetzen —
+        ohne sie bliebe die Regel Prompt-Prosa.
+        """
         conn = self._get_conn()
         try:
             conditions = []
@@ -173,16 +389,18 @@ class TaskClient:
             elif not include_done:
                 conditions.append("status NOT IN ('done', 'cancelled')")
 
-            if priority:
-                conditions.append("priority = ?")
-                params.append(priority)
+            for column, value in (("priority", priority), ("effort", effort),
+                                  ("scope", scope), ("project_path", project_path),
+                                  ("root_id", root_id), ("assigned_to", assigned_to)):
+                if value is not None:
+                    conditions.append(f"{column} = ?")
+                    params.append(value)
 
             where = "WHERE " + " AND ".join(conditions) if conditions else ""
             params.append(limit)
 
             rows = conn.execute(f"""
-                SELECT id, title, description, status, priority,
-                       agent_id, tags, created_at, updated_at, done_at
+                SELECT {_SELECT_COLUMNS}
                 FROM rinnsal_tasks
                 {where}
                 ORDER BY
@@ -202,9 +420,8 @@ class TaskClient:
         """Holt einen einzelnen Task."""
         conn = self._get_conn()
         try:
-            row = conn.execute("""
-                SELECT id, title, description, status, priority,
-                       agent_id, tags, created_at, updated_at, done_at
+            row = conn.execute(f"""
+                SELECT {_SELECT_COLUMNS}
                 FROM rinnsal_tasks WHERE id = ?
             """, (task_id,)).fetchone()
             return self._row_to_dict(row) if row else None
@@ -311,9 +528,14 @@ class TaskClient:
 
     @staticmethod
     def _row_to_dict(row) -> Dict:
+        """Bildet eine Zeile ab. Reihenfolge MUSS `_SELECT_COLUMNS` entsprechen."""
         return {
             'id': row[0], 'title': row[1], 'description': row[2],
             'status': row[3], 'priority': row[4], 'agent_id': row[5],
             'tags': row[6], 'created_at': row[7], 'updated_at': row[8],
             'done_at': row[9],
+            'project_path': row[10], 'root_id': row[11], 'effort': row[12],
+            'scope': row[13], 'source': row[14],
+            'created_by': row[15], 'assigned_to': row[16],
+            'delegation_status': row[17],
         }
