@@ -199,3 +199,78 @@ class TestBundling(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWriterHasItsOwnSelection(unittest.TestCase):
+    """Die Luecke, die der TASKWRITER-Loop selbst aufgedeckt hat (2026-07-14).
+
+    Er bekam dieselbe Auswahl wie der TASKSOLVER — und damit systematisch
+    NICHTS. Der Solver waehlt nur, was klassifiziert ist; der Writer ist aber
+    genau derjenige, der einstuft. Sobald der Solver-Vorrat leer war, hatte der
+    Writer nie wieder etwas zu tun. Ein Loop, der sich selbst aushungert.
+    """
+
+    def setUp(self):
+        self.locks = LockView()
+        self.config = SelectorConfig()
+
+    def test_writer_gets_the_unclassified_ones(self):
+        store = FakeStore([
+            task("Eingestuft", effort="easy", project="/p/a", root=".AI"),
+            task("Uneingestuft", effort="", project="/p/b", root=".SW"),
+        ])
+        bundle = next_bundle(self.config, store, self.locks, role="taskwriter")
+        self.assertIsNotNone(bundle)
+        self.assertEqual(bundle.tasks[0]["title"], "Uneingestuft")
+
+    def test_solver_ignores_exactly_those(self):
+        """Gegenprobe: Was der Writer sucht, meidet der Solver."""
+        store = FakeStore([task("Uneingestuft", effort="", project="/p/b", root=".SW")])
+        self.assertIsNone(next_bundle(self.config, store, self.locks,
+                                      role="tasksolver"))
+        self.assertIsNotNone(next_bundle(self.config, store, self.locks,
+                                         role="taskwriter"))
+
+    def test_writer_is_not_blocked_by_the_effort_ceiling(self):
+        """Der Writer fuehrt nichts aus — er beschreibt nur. Das Aufwands-Gate
+        schuetzt den Solver, nicht ihn."""
+        config = SelectorConfig(effort_ceiling="easy")
+        store = FakeStore([task("Gross und uneingestuft", effort="",
+                                project="/p/x", root=".AI")])
+        self.assertIsNotNone(next_bundle(config, store, self.locks,
+                                         role="taskwriter"))
+
+    def test_writer_still_respects_locks(self):
+        """Aber der Lock-Scope gilt auch fuer ihn: In ein gesperrtes Projekt
+        schreibt er keine Steuerdateien."""
+        tmp = Path(tempfile.mkdtemp())
+        locked = tmp / "root" / "gesperrt"
+        locked.mkdir(parents=True)
+        (locked / "LOCK.txt").write_text("busy", encoding="utf-8")
+        locks = scan_lockmaster([tmp / "root"])
+        store = FakeStore([task("Im gesperrten", effort="",
+                                project=str(locked), root=".X")])
+        self.assertIsNone(next_bundle(self.config, store, locks,
+                                      role="taskwriter"))
+
+    def test_writer_finds_a_project_without_any_tasks(self):
+        """Ist alles eingestuft, sucht er ein Projekt, das noch GAR KEINE
+        Aufgaben hat — dort ist der Rueckstand per Definition unerfasst."""
+        from taskplan.traversal import Project
+
+        store = FakeStore([task("Alles klar", effort="easy",
+                                project="/p/bekannt", root=".AI")])
+        config = SelectorConfig(projects=[
+            Project(path=Path("/p/bekannt"), root_id=".AI"),
+            Project(path=Path("/p/unberuehrt"), root_id=".SW"),
+        ])
+        bundle = next_bundle(config, store, self.locks, role="taskwriter")
+        self.assertIsNotNone(bundle)
+        self.assertIn("unberuehrt", bundle.project_path)
+        self.assertEqual(len(bundle.tasks), 0, "Ein leeres Projekt hat keine Tasks")
+
+    def test_writer_reports_honest_emptiness(self):
+        """Kein Projekt uebrig -> None. Keine erfundene Arbeit."""
+        store = FakeStore([task("X", effort="easy", project="/p/a", root=".AI")])
+        self.assertIsNone(next_bundle(SelectorConfig(), store, self.locks,
+                                      role="taskwriter"))

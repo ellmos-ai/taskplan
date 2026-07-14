@@ -450,11 +450,37 @@ class TaskClient:
         title: Optional[str] = None,
         description: Optional[str] = None,
         priority: Optional[str] = None,
-        tags: Optional[str] = None
+        tags: Optional[str] = None,
+        effort: Optional[str] = None,
+        scope: Optional[str] = None,
+        project_path: Optional[str] = None,
+        root_id: Optional[str] = None,
+        source: Optional[str] = None
     ) -> bool:
-        """Aktualisiert Task-Felder."""
+        """Aktualisiert Task-Felder.
+
+        `effort`/`scope` sind hier NACHTRAEGLICH setzbar — und das ist keine
+        Bequemlichkeit, sondern die einzige Bruecke aus einer Sackgasse:
+
+        Ohne sie waeren unklassifizierte Altlasten dauerhaft unerreichbar. Der
+        TASKSOLVER fasst sie nicht an (leerer `effort` gilt bewusst NICHT als
+        leicht), und der TASKWRITER koennte sie nicht nachstufen. Ein Zustand,
+        aus dem es keinen Ausweg gaebe — ausser einem direkten SQL-Eingriff, den
+        die Rollen-Prompts ausdruecklich verbieten. (Aufgedeckt vom
+        TASKWRITER-Loop, 2026-07-14: 8 Tasks sassen genau so fest.)
+
+        `created_by`, `agent_id` und `assigned_to` bleiben unberuehrt —
+        Nachstufen aendert die Einschaetzung, nicht die Herkunft. Wer zuweisen
+        will, nimmt `assign()`.
+        """
         if priority and priority not in VALID_PRIORITIES:
             raise ValueError(f"priority muss einer von {VALID_PRIORITIES} sein")
+        # Das Gate darf nicht durch die Hintertuer umgehbar sein: Ein ungueltiger
+        # Aufwand muss beim Nachstufen genauso scheitern wie beim Anlegen.
+        if effort and effort not in VALID_EFFORTS:
+            raise ValueError(f"effort muss einer von {VALID_EFFORTS} sein")
+        if scope and scope not in VALID_SCOPES:
+            raise ValueError(f"scope muss einer von {VALID_SCOPES} sein")
 
         now = datetime.now().isoformat()
         conn = self._get_conn()
@@ -462,18 +488,14 @@ class TaskClient:
             fields = ["updated_at = ?"]
             params: list = [now]
 
-            if title is not None:
-                fields.append("title = ?")
-                params.append(title)
-            if description is not None:
-                fields.append("description = ?")
-                params.append(description)
-            if priority is not None:
-                fields.append("priority = ?")
-                params.append(priority)
-            if tags is not None:
-                fields.append("tags = ?")
-                params.append(tags)
+            for column, value in (("title", title), ("description", description),
+                                  ("priority", priority), ("tags", tags),
+                                  ("effort", effort), ("scope", scope),
+                                  ("project_path", project_path),
+                                  ("root_id", root_id), ("source", source)):
+                if value is not None:
+                    fields.append(f"{column} = ?")
+                    params.append(value)
 
             params.append(task_id)
             cursor = conn.execute(

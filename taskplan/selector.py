@@ -62,6 +62,10 @@ class SelectorConfig:
     easy_first_globally: bool = True        # easy ueber ALLE Roots vor dem ersten medium
     projects_per_dive: int = 1
     max_bundle_size: int = 3
+    # Nur der TASKWRITER braucht sie: Ist alles eingestuft, sucht er das
+    # naechste Projekt, das noch GAR KEINE Aufgaben hat. Ohne diese Liste
+    # findet er es nicht — und haette wieder nichts zu tun.
+    projects: List = field(default_factory=list)
 
     def allowed_efforts(self) -> tuple[str, ...]:
         ceiling = self.effort_ceiling if self.effort_ceiling in AUTONOMOUS_EFFORTS else "easy"
@@ -144,13 +148,79 @@ def _bundle_from(tasks: List[dict], mode: str, effort: str,
                   project_path=project, tasks=same)
 
 
+def _writer_bundle(config: SelectorConfig, store: TaskStore,
+                   locks: LockView) -> Optional[Bundle]:
+    """Die Auswahl des TASKWRITER — eine ANDERE als die des Solvers.
+
+    Aufgedeckt vom TASKWRITER-Loop (2026-07-14): Er bekam dieselbe Auswahl wie
+    der TASKSOLVER und damit systematisch NICHTS. Der Solver waehlt nur, was
+    klassifiziert ist — aber der Writer ist ja gerade derjenige, der einstuft.
+    Er haette nie etwas zu tun bekommen, sobald der Solver-Vorrat leer ist.
+
+    Seine Arbeit ist die INVERSE:
+
+      1. UNKLASSIFIZIERTE Aufgaben nachstufen (effort leer). Sie sind fuer den
+         Selektor unsichtbar und liegen sonst fuer immer still — das ist die
+         dringlichste Writer-Arbeit ueberhaupt.
+      2. Ist alles eingestuft: das naechste Projekt, das noch GAR KEINE
+         Aufgaben hat. Dort ist der Rueckstand per Definition unerfasst.
+
+    Der Aufwands-Gate gilt fuer ihn NICHT — er fuehrt nichts aus, er beschreibt
+    nur. Aber der Lock-Scope gilt: In ein gesperrtes Projekt schreibt auch der
+    Writer keine Steuerdateien.
+    """
+    # 1. Unklassifizierte zuerst.
+    open_tasks = store.list(status="open", limit=500)
+    unclassified = [t for t in open_tasks
+                    if not t.get("effort") and _reachable(t, locks)]
+    if unclassified:
+        surface = [t for t in unclassified if not t.get("project_path")]
+        pool = surface or unclassified
+        return _bundle_from(pool, SURFACE if surface else DEEP,
+                            "", config.max_bundle_size)
+
+    # 2. Alles eingestuft -> ein Projekt suchen, das noch keine Aufgaben hat.
+    if not config.deep_enabled or not config.projects:
+        return None
+
+    # Pfade NORMALISIEREN, nicht als Strings vergleichen: "/p/x" und "\p\x"
+    # sind derselbe Ort, aber nicht derselbe String. Ohne das haelt der Writer
+    # laengst erfasste Projekte fuer unberuehrt und schreibt Aufgaben doppelt.
+    def _key(raw) -> str:
+        try:
+            return Path(raw).as_posix().rstrip("/").lower()
+        except (TypeError, ValueError):
+            return str(raw).lower()
+
+    known = {_key(t.get("project_path") or "")
+             for t in store.list(limit=1000, include_done=True)
+             if t.get("project_path")}
+
+    for project in config.projects:
+        if _key(project.path) in known:
+            continue
+        if not locks.allows(project.path, MODIFY):
+            continue   # Gesperrt: der Writer schreibt dort keine Steuerdateien.
+        return Bundle(mode=DEEP, effort="", root_id=project.root_id,
+                      project_path=str(project.path), tasks=[])
+
+    return None
+
+
 def next_bundle(config: SelectorConfig, store: TaskStore,
-                locks: LockView) -> Optional[Bundle]:
+                locks: LockView, role: str = "tasksolver") -> Optional[Bundle]:
     """Was ist als Naechstes dran? None = nichts zu tun.
 
     Gibt der Selektor None zurueck, endet der Durchlauf EHRLICH als Leerlauf —
     statt dass das Modell sich Arbeit sucht, um den Loop zu fuellen.
+
+    Die Rolle bestimmt die Auswahl: Der TASKWRITER sucht, was NICHT eingestuft
+    ist; der TASKSOLVER genau das Gegenteil. Beide dieselbe Auswahl zu geben,
+    hiesse dem Writer systematisch nichts zu geben.
     """
+    if role == "taskwriter":
+        return _writer_bundle(config, store, locks)
+
     efforts = config.allowed_efforts()
 
     # effort ist die primaere Dimension: erst ALLE easy (Oberflaeche wie Tiefe),

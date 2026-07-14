@@ -120,10 +120,34 @@ def reopen(task_id: int) -> bool:
 
 def update(task_id: int, title: Optional[str] = None,
            description: Optional[str] = None, priority: Optional[str] = None,
-           tags: Optional[str] = None) -> bool:
-    """Aktualisiert Task-Felder."""
+           tags: Optional[str] = None, effort: Optional[str] = None,
+           scope: Optional[str] = None, project_path: Optional[str] = None,
+           root_id: Optional[str] = None, source: Optional[str] = None) -> bool:
+    """Aktualisiert Task-Felder — einschliesslich der nachtraeglichen Einstufung.
+
+    Ohne `effort`/`scope` hier waere die Fassade eine Sackgasse: Der TASKWRITER
+    benutzt sie, um Altlasten nachzustufen. Fehlt der Parameter, bleiben
+    unklassifizierte Aufgaben fuer immer unsichtbar — der Solver fasst sie
+    nicht an, und niemand kann sie einstufen.
+    """
     return get_client().update(task_id, title=title, description=description,
-                               priority=priority, tags=tags)
+                               priority=priority, tags=tags, effort=effort,
+                               scope=scope, project_path=project_path,
+                               root_id=root_id, source=source)
+
+
+def classify(task_id: int, effort: str, scope: str = "local",
+             project_path: str = "", root_id: str = "") -> bool:
+    """Stuft eine Aufgabe nachtraeglich ein — die Kernaufgabe des TASKWRITER.
+
+    Bequemer Weg fuer den haeufigsten Fall: Eine Altlast ohne `effort` sichtbar
+    machen. Beruehrt weder Herkunft (`created_by`) noch Zuweisung.
+
+        tasks.classify(42, effort="easy", project_path="/repos/foo", root_id="OSS")
+    """
+    return update(task_id, effort=effort, scope=scope,
+                  project_path=project_path or None,
+                  root_id=root_id or None)
 
 
 def delete(task_id: int) -> bool:

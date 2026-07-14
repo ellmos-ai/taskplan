@@ -51,7 +51,18 @@ def next_work(role: str = "tasksolver") -> dict:
 
     store = TaskClient()
     view, provider = _lock_view()
-    bundle = next_bundle(selector_config(), store, view)
+
+    config = selector_config()
+    # Der TASKWRITER braucht die Projektliste: Ist alles eingestuft, sucht er
+    # das naechste Projekt, das noch GAR KEINE Aufgaben hat. Nur fuer ihn
+    # erheben - fuer den Solver waere es verschwendete Zeit.
+    if role == "taskwriter":
+        from .config import discovery_mode, registry_file, traversal_config
+        from .traversal import discover_projects
+        config.projects = discover_projects(traversal_config(), discovery_mode(),
+                                            registry_file())
+
+    bundle = next_bundle(config, store, view, role=role)
 
     result = {
         "role": role,
@@ -68,13 +79,20 @@ def next_work(role: str = "tasksolver") -> dict:
 
     if bundle is None:
         result["bundle"] = None
-        result["reason"] = (
-            "Kein erreichbares Buendel. Moegliche Gruende: alle offenen Aufgaben "
-            "sind unklassifiziert (effort leer -> der TASKWRITER muss sie erst "
-            "einstufen), zu gross (large/special), zentral (scope=central), oder "
-            "ihre Projekte sind gesperrt. Das ist ein ehrlicher Leerlauf — es wird "
-            "KEINE Arbeit erfunden, um den Loop zu fuellen."
-        )
+        if role == "taskwriter":
+            result["reason"] = (
+                "Nichts zu erfassen: Es gibt keine unklassifizierten Aufgaben mehr, "
+                "und jedes erreichbare Projekt hat bereits Aufgaben. Das ist ein "
+                "ehrlicher Leerlauf — es wird KEINE Arbeit erfunden."
+            )
+        else:
+            result["reason"] = (
+                "Kein erreichbares Buendel. Moegliche Gruende: alle offenen Aufgaben "
+                "sind unklassifiziert (effort leer -> der TASKWRITER muss sie erst "
+                "einstufen), zu gross (large/special), zentral (scope=central), oder "
+                "ihre Projekte sind gesperrt. Das ist ein ehrlicher Leerlauf — es wird "
+                "KEINE Arbeit erfunden, um den Loop zu fuellen."
+            )
         return result
 
     project = Path(bundle.project_path) if bundle.project_path else None

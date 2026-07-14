@@ -192,3 +192,69 @@ class TestMigrationOfExistingDb(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClassificationCanBeAddedLater(unittest.TestCase):
+    """DIE Sackgasse, die der TASKWRITER-Loop aufgedeckt hat (2026-07-14).
+
+    `add()` konnte effort/scope setzen, `update()` NICHT. Damit waren
+    unklassifizierte Altlasten dauerhaft unerreichbar:
+      - der TASKSOLVER faesst sie nicht an (effort leer = nicht als leicht
+        behandeln),
+      - der TASKWRITER konnte sie nicht nachstufen (update kennt effort nicht).
+    Ein Zustand, aus dem es keinen Ausweg gab — ausser einem direkten
+    SQL-Eingriff, den die Prompts ausdruecklich verbieten.
+
+    Das Nachstufen ist die EINZIGE Bruecke zwischen Altbestand und Selektor.
+    """
+
+    def setUp(self):
+        self.client = TaskClient(db_path=":memory:", agent_id="scanner")
+
+    def test_effort_can_be_set_later(self):
+        task = self.client.add("Altlast ohne Einstufung")
+        self.assertEqual(task["effort"], "")
+
+        self.assertTrue(self.client.update(task["id"], effort="easy"))
+        self.assertEqual(self.client.get(task["id"])["effort"], "easy")
+
+    def test_scope_and_project_can_be_set_later(self):
+        task = self.client.add("Altlast")
+        self.client.update(task["id"], scope="central",
+                           project_path="/p/x", root_id=".AI", source="TODO.md")
+        got = self.client.get(task["id"])
+        self.assertEqual(got["scope"], "central")
+        self.assertEqual(got["project_path"], "/p/x")
+        self.assertEqual(got["root_id"], ".AI")
+        self.assertEqual(got["source"], "TODO.md")
+
+    def test_invalid_effort_is_rejected_on_update_too(self):
+        """Das Gate darf nicht durch die Hintertuer umgehbar sein."""
+        task = self.client.add("X")
+        with self.assertRaises(ValueError):
+            self.client.update(task["id"], effort="winzig")
+
+    def test_invalid_scope_is_rejected_on_update_too(self):
+        task = self.client.add("X")
+        with self.assertRaises(ValueError):
+            self.client.update(task["id"], scope="global")
+
+    def test_update_does_not_touch_origin(self):
+        """Nachstufen darf NICHT die Herkunft ueberschreiben."""
+        task = self.client.add("X")
+        self.client.update(task["id"], effort="medium")
+        self.assertEqual(self.client.get(task["id"])["created_by"], "scanner")
+
+    def test_reclassified_task_becomes_selectable(self):
+        """Der eigentliche Beweis: Nach dem Nachstufen SIEHT der Selektor sie."""
+        from taskplan.locks import LockView
+        from taskplan.selector import SelectorConfig, next_bundle
+
+        task = self.client.add("Altlast", project_path="/p/a", root_id=".AI")
+        self.assertIsNone(next_bundle(SelectorConfig(), self.client, LockView()),
+                          "Unklassifiziert darf NICHT waehlbar sein")
+
+        self.client.update(task["id"], effort="easy")
+        bundle = next_bundle(SelectorConfig(), self.client, LockView())
+        self.assertIsNotNone(bundle, "Nach dem Nachstufen muss sie waehlbar sein")
+        self.assertEqual(bundle.tasks[0]["id"], task["id"])
