@@ -121,6 +121,21 @@ Starter als echte Dateien auflösbar:
 from taskplan import list_workflows, get_workflow_prompt, get_workflow_prompt_path
 ```
 
+### Sprache der Prompts
+
+Alle drei Rollen liegen auf **Deutsch und Englisch** vor. Der Default ist Englisch —
+das Modul soll nutzerneutral sein.
+
+```toml
+[language]
+prompts = "de"        # de | en
+```
+
+Für einen einzelnen Lauf: `TASKPLAN_LANG=de`. Fehlt eine Übersetzung, greift der
+englische Fallback — **mit Warnung**. Der Prompt ist der Vertrag der Rolle; ein
+stiller Sprachwechsel wäre schlimmer als ein lauter. Tests stellen sicher, dass
+**jede Zusage die Übersetzung überlebt** — in beide Richtungen.
+
 ---
 
 ## Alles konfigurierbar — nichts hartkodiert

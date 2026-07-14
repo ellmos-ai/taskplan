@@ -117,6 +117,21 @@ launchers:
 from taskplan import list_workflows, get_workflow_prompt, get_workflow_prompt_path
 ```
 
+### Prompt language
+
+All three roles exist in **English and German**. Default is English; the module is
+meant to be user-neutral.
+
+```toml
+[language]
+prompts = "de"        # de | en
+```
+
+Override for a single run with `TASKPLAN_LANG=de`. A missing translation falls back
+to English **with a warning** — the prompt is the role's contract, and a silent
+language switch would be worse than a loud one. Tests assert that every promise
+survives translation, in both directions.
+
 ---
 
 ## Everything is configurable — nothing is hardcoded

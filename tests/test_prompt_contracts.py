@@ -5,10 +5,23 @@ Ein Prompt ist Text — und Text wird beim naechsten Ueberarbeiten gern geglaett
 Genau das ist hier gefaehrlich: Verschwindet "DU WAEHLST NICHT AUS", waehlt das
 Modell wieder selbst, und der Loop faellt in das Verhalten zurueck, das ihn
 jahrelang an der Oberflaeche gehalten hat.
+
+Diese Datei prueft die DEUTSCHE Fassung. Die englische — und die Gleichheit der
+Zusagen ueber beide Sprachen — deckt `test_languages.py` ab.
+
+WICHTIG: Hier werden NICHT die Modul-Konstanten (`taskplan.TASKSOLVER`) benutzt.
+Die sind seit der Zweisprachigkeit von der BENUTZERKONFIGURATION abhaengig — ein
+Test, der davon abhaengt, prueft den Rechner statt das Modul. Bei
+`TASKPLAN_LANG=en` waeren 17 dieser Tests rot gewesen, obwohl am Modul nichts
+kaputt ist.
 """
 import unittest
 
-from taskplan import MAINTAINER, TASKSOLVER, TASKWRITER
+from taskplan.workflows import get_workflow_prompt
+
+TASKSOLVER = get_workflow_prompt("TASKSOLVER", "de")
+TASKWRITER = get_workflow_prompt("TASKWRITER", "de")
+MAINTAINER = get_workflow_prompt("MAINTAINER", "de")
 
 
 class TestSolverDefersToSelector(unittest.TestCase):

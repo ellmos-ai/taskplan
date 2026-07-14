@@ -224,20 +224,25 @@ class TestWorkflowPrompts(unittest.TestCase):
     def test_workflows_are_imported_from_taskplan(self):
         self.assertEqual(list_workflows(),
                          ("TASKSOLVER", "TASKWRITER", "MAINTAINER"))
-        self.assertIn("ROLLE: Du bist der TASKSOLVER", TASKSOLVER)
-        self.assertIn("ROLLE: Du bist der TASKWRITER", TASKWRITER)
-        self.assertIn("ROLLE: Du bist der MAINTAINER", MAINTAINER)
+        # Sprachexplizit: die Modul-Konstanten haengen seit der
+        # Zweisprachigkeit von der Benutzerkonfiguration ab.
+        self.assertIn("ROLLE: Du bist der TASKSOLVER",
+                      get_workflow_prompt("TASKSOLVER", "de"))
+        self.assertIn("ROLE: You are the TASKSOLVER",
+                      get_workflow_prompt("TASKSOLVER", "en"))
 
     def test_maintainer_carries_its_hardest_gate(self):
         """Der MAINTAINER ist die zerstoererischste Rolle (Dateien verschieben,
-        Listen leeren, Logs kuerzen). Sein Kerngate darf nicht wegredigiert
-        werden."""
-        self.assertIn("NIE HART LÖSCHEN", MAINTAINER)
-        self.assertIn("ARCHIVIEREN VOR KÜRZEN", MAINTAINER)
+        Listen leeren, Logs kuerzen). Sein Kerngate darf in KEINER Sprache
+        wegredigiert werden."""
+        self.assertIn("NIE HART LÖSCHEN", get_workflow_prompt("MAINTAINER", "de"))
+        self.assertIn("NEVER HARD-DELETE", get_workflow_prompt("MAINTAINER", "en"))
 
     def test_prompt_lookup_is_case_insensitive(self):
-        self.assertEqual(get_workflow_prompt("tasksolver"), TASKSOLVER)
-        self.assertEqual(get_workflow_prompt(" TaskWriter "), TASKWRITER)
+        self.assertEqual(get_workflow_prompt("tasksolver", "de"),
+                         get_workflow_prompt("TASKSOLVER", "de"))
+        self.assertEqual(get_workflow_prompt(" TaskWriter ", "en"),
+                         get_workflow_prompt("TASKWRITER", "en"))
 
     def test_prompt_paths_are_real_utf8_files(self):
         for name in list_workflows():

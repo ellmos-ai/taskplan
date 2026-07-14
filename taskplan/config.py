@@ -84,6 +84,16 @@ def selector_config():
     )
 
 
+def prompt_language() -> str:
+    """Sprache der Rollen-Prompts.
+
+    Reihenfolge: ENV `TASKPLAN_LANG` > `[language] prompts` > Default (en).
+    Der Default ist Englisch, weil das Modul nutzerneutral ist.
+    """
+    from .workflows import resolve_lang
+    return resolve_lang()
+
+
 def discovery_mode() -> str:
     """Wie werden Projekte gefunden?
 

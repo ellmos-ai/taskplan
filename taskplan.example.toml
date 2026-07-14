@@ -8,6 +8,15 @@
 # Aufwandsdecke "medium", Lock-Provider "lockmaster".
 
 # ---------------------------------------------------------------------------
+# SPRACHE der Rollen-Prompts
+# ---------------------------------------------------------------------------
+# Die drei Rollen (TASKSOLVER, TASKWRITER, MAINTAINER) liegen auf Deutsch und
+# Englisch vor. Default ist "en" — das Modul ist nutzerneutral.
+# Override auch per ENV: TASKPLAN_LANG=de
+[language]
+prompts = "en"   # de | en
+
+# ---------------------------------------------------------------------------
 # SPEICHER — wo die Aufgaben liegen
 # ---------------------------------------------------------------------------
 [storage]

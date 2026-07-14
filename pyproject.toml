@@ -29,4 +29,8 @@ version = {attr = "taskplan.__version__"}
 include = ["taskplan*"]
 
 [tool.setuptools.package-data]
+# Die Prompts liegen sprachgetrennt. Ohne diese Eintraege waeren sie im Wheel
+# nicht enthalten und `get_workflow_prompt()` liefe ins Leere.
 "taskplan.prompts" = ["*.txt"]
+"taskplan.prompts.de" = ["*.txt"]
+"taskplan.prompts.en" = ["*.txt"]
