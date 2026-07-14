@@ -237,22 +237,41 @@ def _maintainer_bundle(config: SelectorConfig, store: TaskStore,
         except (TypeError, ValueError):
             return str(raw).lower()
 
-    # Projekte, an denen jemand arbeitet: aktiv ODER geclaimt. Der Lock allein
-    # reicht als Kriterium NICHT — zwischen Claim und Lock liegt ein Fenster.
-    busy = set()
-    for task in store.list(limit=1000):
-        if not task.get("project_path"):
-            continue
-        if task.get("status") == "active" or task.get("assigned_to"):
-            busy.add(_key(task["project_path"]))
+    busy = set()        # jemand arbeitet dort: aktiv ODER geclaimt
+    touched = set()     # hat ueberhaupt schon Aufgaben (egal welchen Status)
 
-    for project in config.projects:
-        if _key(project.path) in busy:
+    for task in store.list(limit=1000, include_done=True):
+        project = task.get("project_path")
+        if not project:
             continue
-        if not locks.allows(project.path, MODIFY):
-            continue
-        return Bundle(mode=DEEP, effort="", root_id=project.root_id,
-                      project_path=str(project.path), tasks=[])
+        key = _key(project)
+        touched.add(key)
+        if task.get("status") == "active" or task.get("assigned_to"):
+            busy.add(key)
+
+    # Der Maintainer bevorzugt Projekte, die schon BERUEHRT sind — und das ist
+    # kein Trick zur Kollisionsvermeidung, sondern inhaltlich richtig:
+    #
+    #   Wo schon gearbeitet wurde, ist Doku-Drift entstanden: veraltete
+    #   STATE.md, unvollstaendige Architekturtabellen, Logs, die gewachsen
+    #   sind. Ein unberuehrtes Projekt hat nichts, was aufzuraeumen waere —
+    #   dort fehlt die ERFASSUNG, und die ist die Arbeit des TASKWRITER.
+    #
+    # Damit greifen die beiden Rollen naturgemaess auf disjunkte Mengen zu:
+    # der Writer sucht unberuehrte Projekte, der Maintainer beruehrte. Eine
+    # kuenstliche Trennung (etwa: "der Maintainer laeuft die Liste rueckwaerts")
+    # waere ein Pflaster gewesen, das bei wenigen Projekten wieder kollidiert.
+    for prefer_touched in (True, False):
+        for project in config.projects:
+            key = _key(project.path)
+            if key in busy:
+                continue
+            if (key in touched) != prefer_touched:
+                continue
+            if not locks.allows(project.path, MODIFY):
+                continue
+            return Bundle(mode=DEEP, effort="", root_id=project.root_id,
+                          project_path=str(project.path), tasks=[])
 
     return None
 

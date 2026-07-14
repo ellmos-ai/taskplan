@@ -345,3 +345,57 @@ class TestMaintainerDoesNotCollideWithSolver(unittest.TestCase):
                              role="maintainer")
         self.assertIsNotNone(bundle)
         self.assertEqual(len(bundle.tasks), 0)
+
+
+class TestAllThreeRolesGetDifferentWork(unittest.TestCase):
+    """Die Rollen duerfen sich nicht ins Gehege kommen — und zwar KEINE zwei.
+
+    Der erste Fix entkoppelte Solver und Maintainer — und verschob die
+    Kollision auf Writer/Maintainer. Beide liefen von oben durch dieselbe
+    Projektliste.
+
+    Die Loesung ist inhaltlich, nicht mechanisch: Die beiden suchen gar nicht
+    dasselbe. Der Writer sucht UNBERUEHRTE Projekte (dort fehlt die Erfassung),
+    der Maintainer BERUEHRTE (dort ist Doku-Drift entstanden). Disjunkte
+    Mengen — ohne kuenstlichen Trick.
+    """
+
+    def setUp(self):
+        from taskplan.traversal import Project
+        self.locks = LockView()
+        self.projects = [
+            Project(path=Path("/p/beruehrt"), root_id=".AI"),
+            Project(path=Path("/p/unberuehrt"), root_id=".SW"),
+        ]
+        self.config = SelectorConfig(projects=self.projects)
+        # /p/beruehrt hat eine (erledigte) Aufgabe -> dort war schon jemand.
+        done = task("Erledigt", effort="easy", project="/p/beruehrt", root=".AI")
+        done["status"] = "done"
+        self.store = FakeStore([done])
+
+    def test_writer_takes_the_untouched_one(self):
+        b = next_bundle(self.config, self.store, self.locks, role="taskwriter")
+        self.assertIsNotNone(b)
+        self.assertIn("unberuehrt", b.project_path)
+
+    def test_maintainer_takes_the_touched_one(self):
+        """Wo schon gearbeitet wurde, ist Doku-Drift entstanden."""
+        b = next_bundle(self.config, self.store, self.locks, role="maintainer")
+        self.assertIsNotNone(b)
+        self.assertIn("beruehrt", b.project_path)
+        self.assertNotIn("unberuehrt", b.project_path)
+
+    def test_writer_and_maintainer_never_collide(self):
+        w = next_bundle(self.config, self.store, self.locks, role="taskwriter")
+        m = next_bundle(self.config, self.store, self.locks, role="maintainer")
+        self.assertNotEqual(
+            Path(w.project_path).as_posix().lower(),
+            Path(m.project_path).as_posix().lower(),
+            "Writer und Maintainer bekamen DASSELBE Projekt!")
+
+    def test_maintainer_falls_back_to_untouched_if_nothing_else(self):
+        """Gibt es nur unberuehrte Projekte, nimmt er die auch — lieber das als
+        Leerlauf."""
+        config = SelectorConfig(projects=[self.projects[1]])   # nur unberuehrt
+        b = next_bundle(config, FakeStore([]), self.locks, role="maintainer")
+        self.assertIsNotNone(b)
