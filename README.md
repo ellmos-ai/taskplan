@@ -1,91 +1,221 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="TASKPLAN" width="100%">
+</p>
+
 # taskplan
 
-Standalone SQLite task module — the third pillar of the `.MEMORY` stack
-(**USMC** curated session memory · **GARDENER** organic memory + cross-source
-index · **TASKPLAN** tasks). Extracted from `rinnsal/tasks` on 2026-07-11
-(decision [U 2026-07-11]); rinnsal now imports it back through a seam with a
-bundled fallback. Zero external dependencies (stdlib only), Python ≥ 3.10.
+**Deterministic task selection for LLM agents.** Zero dependencies, stdlib only,
+Python ≥ 3.10.
 
-## Scope: Tasks are NOT tickets
+*[Deutsche Fassung → README_de.md](README_de.md)*
 
-Tasks (this module) and tickets (file-based ticket systems such as
-`_control-center/_TICKETS`, IDs like `T-YYYYMMDD-NN`) are **separate systems**.
-Tickets *can* lead to tasks, but do not have to. The only bridge is
-`api.add_from_ticket(ticket_id, title, ...)`, which creates a regular task
-tagged `ticket:<id>`. taskplan never imports, mirrors, or manages tickets.
+Most agent task loops let the *model* decide what to work on next. That sounds
+flexible, and it fails in a specific, predictable way: the model picks whatever is
+most visible, cleans it up, and eventually reports *"nothing left to do"* — while the
+real backlog sits one directory level below, unread.
 
-## Usage
+taskplan moves that decision **out of the prompt and into code**. A deterministic
+selector decides *what* comes next; the model keeps the judgment calls (*is this easy?
+is it safe? did it pass?*).
+
+---
+
+## The rule the selector enforces
+
+```
+  Surface sweep (all roots)
+    → deep dive: EASY, in one root
+    → back to the surface
+    → deep dive: EASY, in the next root
+    → … until NO root has easy work left
+    → only then: the medium pass
+```
+
+**Effort is the primary sort dimension; root rotation is only secondary.** Easy tasks
+are exhausted *globally* before a medium one is touched anywhere.
+
+That is not tidiness. Easy tasks are exactly what unblocks whoever is deep inside a
+hard problem somewhere else. Clearing a small thing in project A is worth more than
+going deeper in project B. That is *why* the easy/medium distinction exists at all.
+
+## Gates that live in code, not in prose
+
+| Effort | Meaning | Autonomous? |
+|---|---|---|
+| `easy` | one or few files, one project, reversible, mechanically verifiable | **always** |
+| `medium` | several files in **one** project, no architectural change | only when no `easy` is left anywhere |
+| `large` | architecture, cross-project, migration | **never** |
+| `special` | needs domain knowledge, credentials, or an irreversible action | **never** |
+| *(empty)* | unclassified | **not treated as easy** — better left alone than wrongly assumed harmless |
+
+`scope = "central"` (shared infrastructure others build on) is never autonomous
+either, regardless of effort.
+
+When nothing is selectable, `next_bundle()` returns `None`. The loop ends as an
+**honest no-op** instead of inventing work to fill itself.
+
+---
+
+## Quick start
 
 ```python
 from taskplan import api as tasks
 
 tasks.init(agent_id="opus")
-tasks.add("Implement feature X", priority="high")
-tasks.add_from_ticket("T-20260711-01", "Fix reported crash")
+tasks.add("Fix encoding in docs", priority="high", effort="easy",
+          project_path="/repos/foo", root_id="OSS")
 
-for t in tasks.list():
-    print(f"[{t['id']}] {t['title']} ({t['status']})")
+for t in tasks.list(effort="easy", scope="local"):
+    print(f"[{t['id']}] {t['title']}")
 
 tasks.done(1)
 ```
 
-## Importierbare Workflow-Prompts
+Ask the selector what to do next:
 
-TASKPLAN liefert die systemweiten Rollen **TASKSOLVER** und **TASKWRITER** als
-Paketressourcen mit. Dadurch verwenden Python-Integrationen, Agenten-Starter und
-das lokale Control-Center dieselbe kanonische Promptfassung:
-
-```python
-from taskplan import (
-    TASKSOLVER,
-    TASKWRITER,
-    get_workflow_prompt,
-    get_workflow_prompt_path,
-    list_workflows,
-)
-
-print(list_workflows())
-print(get_workflow_prompt("TASKSOLVER"))
-print(get_workflow_prompt_path("TASKWRITER"))
+```bash
+python -m taskplan next            # mode, effort, project, task IDs, permissions
+python -m taskplan doctor          # which database am I actually using?
+python -m taskplan projects list   # what does the loop see?
+python -m taskplan projects markers
 ```
 
-- **TASKSOLVER** erledigt pro Loop ein zusammenhängendes Aufgaben-Bundle in
-  genau einem Projekt und markiert Tasks erst nach empirischer Prüfung als erledigt.
-- **TASKWRITER** erkennt und formalisiert pro Loop Aufgaben in genau einem
-  Projekt, führt sie aber nicht aus.
-- Tasks bleiben von Tickets getrennt; beide Workflows benutzen TASKPLAN als
-  Task-Speicher und respektieren lokale Projekt-, Lock- und Rechtekonventionen.
+`next` exit codes: `0` = bundle returned · `1` = nothing to do · `2` = role disabled.
 
-Or with an explicit client:
+### Who created it, who works on it
+
+`agent_id` used to carry three meanings at once (creator, worker, role) and was
+**overwritten on assignment** — so the origin was lost the moment someone picked a
+task up. Now they are separate:
 
 ```python
-from taskplan import TaskClient
-client = TaskClient(db_path="~/.rinnsal/scanner_tasks.db", agent_id="scanner")
+client.add("…")                      # sets created_by  (immutable)
+client.assign(task_id, to="claude")  # sets assigned_to + delegation_status
 ```
 
-## Database resolution (when no `db_path` is given)
+Whoever takes a task writes to `assigned_to` — **never** to the field carrying the
+origin.
 
-1. env `TASKPLAN_DB`
-2. env `RINNSAL_DB` (compatibility)
-3. `~/.taskplan/taskplan.db`
+---
 
-## Compatibility
+## Three roles
 
-- Table name stays **`rinnsal_tasks`** so existing databases
-  (`~/.rinnsal/rinnsal.db`, `~/.rinnsal/scanner_tasks.db`) and consumers keep
-  working without migration.
-- **rinnsal** (`rinnsal.tasks.client`) prefers taskplan when installed and
-  injects its own default DB (`~/.rinnsal/rinnsal.db` / rinnsal config);
-  without taskplan it falls back to its bundled copy. The import path
-  `rinnsal.tasks.client.TaskClient` stays stable (used by the homebase
-  `hb_state_task_*` seam and the `_tasks` scanner).
-- Statuses: `open`, `active`, `done`, `cancelled` · Priorities: `critical`,
-  `high`, `medium`, `low`.
+| Role | Does | Never does |
+|---|---|---|
+| **TASKWRITER** | finds and formalizes tasks, **classifies effort/scope** | execute them |
+| **TASKSOLVER** | works a bundle, verifies it, claims it via `assign()` | choose the project |
+| **MAINTAINER** | keeps files and directories clean, curates project discovery | write or solve tasks |
+
+The writer is upstream: **an unclassified task is an invisible task**, because the
+solver refuses to guess at its size.
+
+Prompts ship with the package (`taskplan.TASKSOLVER`, `.TASKWRITER`, `.MAINTAINER`) —
+as resources, not hardcoded strings, and resolvable as real files for external
+launchers:
+
+```python
+from taskplan import list_workflows, get_workflow_prompt, get_workflow_prompt_path
+```
+
+---
+
+## Everything is configurable — nothing is hardcoded
+
+See [`taskplan.example.toml`](taskplan.example.toml) for the fully commented version.
+
+### Storage
+
+SQLite is the recommended default, but the selector talks to a narrow `TaskStore`
+protocol and **knows no SQL**. A `files` backend keeps the truth in your `TODO.md`
+files — no database at all. Foreign systems plug in via entry point.
+
+Resolution order: env `TASKPLAN_DB` → `taskplan.toml` `[storage].path` → env
+`RINNSAL_DB` → `~/.taskplan/taskplan.db`.
+
+> `python -m taskplan doctor` warns when the *active* database is empty while another
+> one holds data. That silent failure mode — writing into a database nobody reads, no
+> error, no warning, just no effect — is exactly what it exists to catch.
+
+### Project discovery
+
+Five marker categories, each switchable, combined with a real boolean expression:
+
+```toml
+[traversal.markers]
+expression = "(dir_patterns AND files) OR git"   # AND / OR / NOT, parentheses
+```
+
+| # | Category | Detects |
+|---|---|---|
+| 1 | `dir_patterns` | patterns in the folder name |
+| 2 | `files` | marker files (`CLAUDE.md` is more specific than `TODO.md`) |
+| 3 | `subdirs` | marker directories (`.claude`) |
+| 4 | `git` | a repository — including worktrees/submodules, where `.git` is a **file** |
+| 5 | `flag_file` | an explicit marker; beats every heuristic |
+
+The expression parser is hand-written, **not `eval`** — a config file must never
+execute arbitrary code. A typo in a marker name is an **error**, not a silent
+"never matches"; otherwise the loop would quietly find nothing at all.
+
+Not enough? `discovery = "manual"` uses a hand-curated registry instead of (or
+alongside) the automatic scan. The MAINTAINER keeps it up to date.
+
+> **A trap worth knowing — measured on a real system.** Folder-name patterns are
+> *dangerous* with `combine = "any"` if your intermediate levels follow the same
+> convention as your projects. Categories named `CASH`, `DATA`, `CODING` match an
+> uppercase pattern just like the projects beneath them — the scan stops at the
+> category and never descends. Result: **46 wrong "projects" instead of 91 real
+> ones.** `dir_patterns AND files` fixes it. That is why `dir_patterns` defaults to
+> *off*.
+
+### Locks — three axes, not one switch
+
+| Action | Rule |
+|---|---|
+| read / analyze | **always allowed** — a lock protects against *change*, not against *knowledge* |
+| create a new file | usually allowed (does not collide with work on existing files) |
+| modify a file | only without a foreign lock in scope |
+
+And crucially: **a lock in one project locks that project** — not its siblings, and
+not the whole pipeline.
+
+Different system, different lock scheme? `provider = "rules"` evaluates **nothing** —
+it passes your rule files through as *text into the prompt*. Better an agent that
+reads the real rule than a parser that guesses at its meaning.
+
+### Roles, models, task sources, depth
+
+All switchable. A disabled role **aborts cleanly on start** instead of silently
+idling. `combined = true` runs all active roles in one worker — so
+`maintainer = false` + `combined = true` gives you a 2-in-1 without needing its own
+mode. Model choice belongs in the config, not in the launcher.
+
+---
+
+## Tasks are not tickets
+
+Tasks (this module) and tickets (file-based systems, IDs like `T-YYYYMMDD-NN`) are
+**separate systems**. Tickets *can* become tasks, but need not. The only bridge is
+`api.add_from_ticket(...)`, which creates a normal task tagged `ticket:<id>`.
+taskplan never imports, mirrors, or manages tickets.
+
+## Origin & compatibility
+
+Third pillar of the `.MEMORY` stack — **USMC** (curated session memory) · **GARDENER**
+(organic memory + cross-source index) · **TASKPLAN** (tasks). Extracted from
+`rinnsal/tasks`; rinnsal imports it back through a seam with a bundled fallback.
+
+The table name **`rinnsal_tasks` is kept deliberately**, and schema changes are
+**additive only** — existing readers keep working without migration.
+
+Statuses: `open`, `active`, `done`, `cancelled` · Priorities: `critical`, `high`,
+`medium`, `low` · Efforts: `easy`, `medium`, `large`, `special` · Scopes: `local`,
+`central`.
 
 ## Tests
 
-```
-python -m unittest discover -s tests -v
+```bash
+python -m pytest tests/ -q
 ```
 
 ## License

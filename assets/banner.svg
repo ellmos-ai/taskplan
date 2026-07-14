@@ -1,0 +1,22 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 320' role='img' aria-labelledby='title description'>
+  <title id='title'>TASKPLAN</title>
+  <desc id='description'>Deterministic task selection for LLM agents: surface to deep, easy first, zero dependencies.</desc>
+
+  <rect width='1280' height='320' fill='#0d1117'/>
+
+  <g fill='none' stroke='#58a6ff' stroke-linecap='round' stroke-linejoin='round'>
+    <path d='M790 72 H1180 L1138 112 H832 Z' fill='#58a6ff' fill-opacity='.10' stroke-opacity='.55' stroke-width='2'/>
+    <path d='M838 130 H1132 L1096 166 H874 Z' fill='#58a6ff' fill-opacity='.075' stroke-opacity='.4' stroke-width='2'/>
+    <path d='M884 184 H1086 L1056 216 H914 Z' fill='#58a6ff' fill-opacity='.05' stroke-opacity='.28' stroke-width='2'/>
+    <path d='M985 98 V236' stroke-width='3' stroke-opacity='.85'/>
+    <path d='M967 218 L985 238 L1003 218' stroke-width='3' stroke-opacity='.85'/>
+    <circle cx='985' cy='98' r='5' fill='#58a6ff' stroke='none'/>
+  </g>
+
+  <g font-family='Segoe UI, Helvetica, Arial, sans-serif'>
+    <text x='88' y='139' fill='#f0f6fc' font-size='72' font-weight='700' letter-spacing='3'>TASKPLAN</text>
+    <rect x='88' y='158' width='72' height='4' rx='2' fill='#58a6ff'/>
+    <text x='88' y='205' fill='#c9d1d9' font-size='25' font-weight='400'>Deterministic task selection for LLM agents</text>
+    <text x='88' y='248' fill='#8b949e' font-size='17' letter-spacing='.6'>surface &#8594; deep  &#183;  easy first  &#183;  zero dependencies</text>
+  </g>
+</svg>
