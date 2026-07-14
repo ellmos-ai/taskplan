@@ -207,6 +207,56 @@ def _writer_bundle(config: SelectorConfig, store: TaskStore,
     return None
 
 
+def _maintainer_bundle(config: SelectorConfig, store: TaskStore,
+                       locks: LockView) -> Optional[Bundle]:
+    """Die Auswahl des MAINTAINER — wieder eine ANDERE.
+
+    Aufgedeckt vom MAINTAINER-Loop (2026-07-14): Er fiel in den TASKSOLVER-Zweig
+    und bekam damit systematisch DASSELBE Projekt zugewiesen wie der Solver.
+    Ergebnis: 2 von 2 Zuweisungen kollidierten — der Solver lockte das Projekt,
+    der Maintainer stand Sekunden vor dem Schreiben vor einem fremden Lock.
+    Das war keine Race Condition, sondern eine garantierte Kollision.
+
+    Der Maintainer arbeitet an PROJEKTEN, nicht an Aufgaben. Seine Auswahl:
+
+      Das naechste erreichbare Projekt, an dem gerade NIEMAND arbeitet.
+
+    "Niemand" heisst zweierlei — beides muss geprueft werden, keines genuegt
+    allein:
+      * kein fremder Lock (der Solver setzt ihn, BEVOR er anfaengt), UND
+      * keine aktive/zugewiesene Aufgabe (der Solver hat sie geclaimt, aber
+        seinen Lock vielleicht noch nicht gesetzt — genau dieses Zeitfenster
+        liess die Kollisionen entstehen).
+    """
+    if not config.projects:
+        return None
+
+    def _key(raw) -> str:
+        try:
+            return Path(raw).as_posix().rstrip("/").lower()
+        except (TypeError, ValueError):
+            return str(raw).lower()
+
+    # Projekte, an denen jemand arbeitet: aktiv ODER geclaimt. Der Lock allein
+    # reicht als Kriterium NICHT — zwischen Claim und Lock liegt ein Fenster.
+    busy = set()
+    for task in store.list(limit=1000):
+        if not task.get("project_path"):
+            continue
+        if task.get("status") == "active" or task.get("assigned_to"):
+            busy.add(_key(task["project_path"]))
+
+    for project in config.projects:
+        if _key(project.path) in busy:
+            continue
+        if not locks.allows(project.path, MODIFY):
+            continue
+        return Bundle(mode=DEEP, effort="", root_id=project.root_id,
+                      project_path=str(project.path), tasks=[])
+
+    return None
+
+
 def next_bundle(config: SelectorConfig, store: TaskStore,
                 locks: LockView, role: str = "tasksolver") -> Optional[Bundle]:
     """Was ist als Naechstes dran? None = nichts zu tun.
@@ -220,6 +270,8 @@ def next_bundle(config: SelectorConfig, store: TaskStore,
     """
     if role == "taskwriter":
         return _writer_bundle(config, store, locks)
+    if role == "maintainer":
+        return _maintainer_bundle(config, store, locks)
 
     efforts = config.allowed_efforts()
 

@@ -56,7 +56,7 @@ def next_work(role: str = "tasksolver") -> dict:
     # Der TASKWRITER braucht die Projektliste: Ist alles eingestuft, sucht er
     # das naechste Projekt, das noch GAR KEINE Aufgaben hat. Nur fuer ihn
     # erheben - fuer den Solver waere es verschwendete Zeit.
-    if role == "taskwriter":
+    if role in ("taskwriter", "maintainer"):
         from .config import discovery_mode, registry_file, traversal_config
         from .traversal import discover_projects
         config.projects = discover_projects(traversal_config(), discovery_mode(),
@@ -84,6 +84,12 @@ def next_work(role: str = "tasksolver") -> dict:
                 "Nichts zu erfassen: Es gibt keine unklassifizierten Aufgaben mehr, "
                 "und jedes erreichbare Projekt hat bereits Aufgaben. Das ist ein "
                 "ehrlicher Leerlauf — es wird KEINE Arbeit erfunden."
+            )
+        elif role == "maintainer":
+            result["reason"] = (
+                "Kein freies Projekt: Jedes erreichbare Projekt ist entweder "
+                "gesperrt oder wird gerade von einer anderen Rolle bearbeitet "
+                "(aktive/zugewiesene Aufgabe). Ehrlicher Leerlauf."
             )
         else:
             result["reason"] = (

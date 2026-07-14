@@ -274,3 +274,74 @@ class TestWriterHasItsOwnSelection(unittest.TestCase):
         store = FakeStore([task("X", effort="easy", project="/p/a", root=".AI")])
         self.assertIsNone(next_bundle(SelectorConfig(), store, self.locks,
                                       role="taskwriter"))
+
+
+class TestMaintainerDoesNotCollideWithSolver(unittest.TestCase):
+    """Die Kollision, die der MAINTAINER-Loop selbst gemeldet hat (2026-07-14).
+
+    Er fiel in den TASKSOLVER-Zweig und bekam DASSELBE Projekt zugewiesen.
+    2 von 2 Zuweisungen kollidierten: Der Solver lockte das Projekt, der
+    Maintainer stand Sekunden vor dem Schreiben vor einem fremden Lock.
+
+    Das war KEINE Race Condition. Es war eine garantierte Kollision.
+    """
+
+    def setUp(self):
+        from taskplan.traversal import Project
+        self.locks = LockView()
+        self.projects = [
+            Project(path=Path("/p/a"), root_id=".AI"),
+            Project(path=Path("/p/b"), root_id=".SW"),
+        ]
+        self.config = SelectorConfig(projects=self.projects)
+
+    def test_maintainer_avoids_a_project_someone_works_on(self):
+        """Der Solver hat /p/a geclaimt -> der Maintainer nimmt /p/b."""
+        t = task("Solver arbeitet dran", effort="easy", project="/p/a", root=".AI")
+        t["status"] = "active"
+        store = FakeStore([t])
+        bundle = next_bundle(self.config, store, self.locks, role="maintainer")
+        self.assertIsNotNone(bundle)
+        self.assertIn("b", bundle.project_path)
+
+    def test_claimed_but_not_yet_locked_also_counts_as_busy(self):
+        """DAS Zeitfenster, das die Kollisionen erzeugte: Der Solver hat
+        geclaimt (assigned_to), seinen Lock aber noch nicht gesetzt. Der Lock
+        allein als Kriterium haette hier nicht gereicht."""
+        t = task("Geclaimt", effort="easy", project="/p/a", root=".AI")
+        t["assigned_to"] = "claude"
+        store = FakeStore([t])
+        bundle = next_bundle(self.config, store, self.locks, role="maintainer")
+        self.assertIsNotNone(bundle)
+        self.assertNotIn("/p/a", bundle.project_path.replace("\\", "/"))
+
+    def test_maintainer_and_solver_never_get_the_same_project(self):
+        """Die Kernzusage — als Test festgehalten."""
+        t = task("Offen", effort="easy", project="/p/a", root=".AI")
+        t["status"] = "active"
+        store = FakeStore([t])
+        solver = next_bundle(self.config, store, self.locks, role="tasksolver")
+        maint = next_bundle(self.config, store, self.locks, role="maintainer")
+        if solver and maint:
+            self.assertNotEqual(
+                Path(solver.project_path).as_posix().lower(),
+                Path(maint.project_path).as_posix().lower(),
+                "Solver und Maintainer bekamen DASSELBE Projekt!")
+
+    def test_maintainer_respects_locks(self):
+        tmp = Path(tempfile.mkdtemp())
+        locked = tmp / "root" / "gesperrt"
+        locked.mkdir(parents=True)
+        (locked / "LOCK.txt").write_text("busy", encoding="utf-8")
+        from taskplan.traversal import Project
+        config = SelectorConfig(projects=[Project(path=locked, root_id=".X")])
+        locks = scan_lockmaster([tmp / "root"])
+        self.assertIsNone(next_bundle(config, FakeStore([]), locks,
+                                      role="maintainer"))
+
+    def test_maintainer_needs_no_tasks(self):
+        """Er raeumt auf — dafuer braucht er keine erfasste Aufgabe."""
+        bundle = next_bundle(self.config, FakeStore([]), self.locks,
+                             role="maintainer")
+        self.assertIsNotNone(bundle)
+        self.assertEqual(len(bundle.tasks), 0)
