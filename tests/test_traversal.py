@@ -177,7 +177,7 @@ class TestRootsFromLockRoots(unittest.TestCase):
         self.assertEqual(find_roots(self.tmp / "gibtsnicht.json"), [])
 
     def test_env_vars_in_paths_are_expanded(self):
-        """Die echten Roots stehen als %USERPROFILE%\OneDrive\... in der Datei.
+        r"""Die echten Roots stehen als %USERPROFILE%\OneDrive\... in der Datei.
         Ohne Aufloesung findet man NULL Roots — genau das passierte zuerst."""
         import os
         os.environ["TP_TEST_ROOT"] = str(self.tmp)

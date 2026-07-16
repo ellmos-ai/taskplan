@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+- Windows-Pfad-Docstring im Traversal-Test als Raw-String markiert, damit
+  `python -m pytest` ohne `SyntaxWarning` läuft.
+
 ### Security
 - Repository-Hygiene erweitert: lokale Env-/Token-/Credential-/Recovery-/Key-,
   Zertifikats- und SQLite-Sidecar-Dateien werden ignoriert und per Test
