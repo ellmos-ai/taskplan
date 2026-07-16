@@ -5,6 +5,8 @@
 ### Fixed
 - Windows-Pfad-Docstring im Traversal-Test als Raw-String markiert, damit
   `python -m pytest` ohne `SyntaxWarning` läuft.
+- TOML-Konfigurationstests überspringen Python 3.10 korrekt, wenn `tomllib`
+  als Stdlib-Modul noch nicht verfügbar ist.
 
 ### Security
 - Repository-Hygiene erweitert: lokale Env-/Token-/Credential-/Recovery-/Key-,

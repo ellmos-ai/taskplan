@@ -14,8 +14,9 @@ from taskplan import config as cfg
 
 def _with_config(toml: str):
     """Patcht die geladene Konfiguration — ohne Datei im echten Home anzulegen."""
-    import tomllib
-    data = tomllib.loads(toml)
+    if cfg.tomllib is None:
+        raise unittest.SkipTest("TOML config parsing requires Python >= 3.11")
+    data = cfg.tomllib.loads(toml)
     return mock.patch.object(cfg, "load_config", return_value=data)
 
 
