@@ -3,6 +3,13 @@
 import sys
 
 
+def _option(args: list[str], name: str, default: str = "") -> str:
+    if name not in args:
+        return default
+    index = args.index(name)
+    return args[index + 1] if index + 1 < len(args) else default
+
+
 def _projects_command(args: list[str]) -> int:
     """Die manuelle Projekt-Registry — der Fallback der Auto-Erkennung.
 
@@ -11,30 +18,44 @@ def _projects_command(args: list[str]) -> int:
     aus wie ein Projekt), traegt man es hier von Hand ein. Der MAINTAINER pflegt
     die Liste automatisch nach.
     """
-    from .config import discovery_mode, registry_file, traversal_config
+    from .config import discovery_mode, discovery_timeout_seconds, registry_file
     from .registry import (add_project, load_registry, registry_path,
                            remove_project)
-    from .traversal import discover_projects, find_projects
 
     action = args[0] if args else "list"
     configured = registry_file()
 
     if action == "list":
+        from .runner import (ProjectDiscoveryTimeout,
+                             _discover_projects_bounded)
         entries = load_registry(configured)
-        auto = find_projects(traversal_config())
-        total = discover_projects(traversal_config(), discovery_mode(), configured)
+        try:
+            total = _discover_projects_bounded(discovery_timeout_seconds())
+        except (ProjectDiscoveryTimeout, RuntimeError) as exc:
+            print(f"Projekt-Discovery nicht verfügbar: {exc}", file=sys.stderr)
+            return 3
         print(f"Discovery-Modus : {discovery_mode()}")
         print(f"Registry-Datei  : {registry_path(configured)}")
         print()
-        print(f"Automatisch erkannt : {len(auto)}")
         print(f"Manuell eingetragen : {len(entries)}")
-        print(f"Ergibt zusammen     : {len(total)}")
+        print(f"Erreichbar gesamt   : {len(total)}  (Auto + Registry, gecacht)")
         if entries:
             print()
             print("Manuelle Eintraege:")
             for entry in entries:
                 note = f"  ({entry.note})" if entry.note else ""
                 print(f"  [{entry.root_id}] {entry.path}{note}")
+        return 0
+
+    if action == "refresh":
+        from .runner import (ProjectDiscoveryTimeout,
+                             _discover_projects_bounded)
+        try:
+            total = _discover_projects_bounded(discovery_timeout_seconds(), force=True)
+        except (ProjectDiscoveryTimeout, RuntimeError) as exc:
+            print(f"Projekt-Discovery nicht verfügbar: {exc}", file=sys.stderr)
+            return 3
+        print(f"Projekt-Cache erneuert: {len(total)} Projekte")
         return 0
 
     if action == "add":
@@ -119,7 +140,7 @@ def _projects_command(args: list[str]) -> int:
         print(f"  Flagdatei schlaegt IMMER alles: {rules.flag_file.enabled}")
         return 0
 
-    print(f"Unbekannt: {action!r}. Erlaubt: list | add | remove | flag | unflag | markers",
+    print(f"Unbekannt: {action!r}. Erlaubt: list | refresh | add | remove | flag | unflag | markers",
           file=sys.stderr)
     return 2
 
@@ -158,6 +179,49 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
 
+    if command == "runtime":
+        from .runtime import runtime_profile
+        role = _option(rest, "--role", "tasksolver")
+        provider = _option(rest, "--provider", "")
+        field = _option(rest, "--field", "")
+        try:
+            profile = runtime_profile(role, provider)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        if field:
+            if field not in profile:
+                print(f"Unbekanntes Runtime-Feld: {field}", file=sys.stderr)
+                return 2
+            print(profile[field])
+            return 0
+        import json
+        print(json.dumps(profile, ensure_ascii=False, indent=2))
+        return 0
+
+    if command == "startup-prompt":
+        from .runtime import startup_prompt
+        role = _option(rest, "--role", "tasksolver")
+        provider = _option(rest, "--provider", "")
+        try:
+            print(startup_prompt(role, provider))
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        return 0
+
+    if command == "backoff":
+        from .runtime import apply_backoff
+        role = _option(rest, "--role", "tasksolver")
+        provider = _option(rest, "--provider", "")
+        try:
+            seconds = apply_backoff(role, provider)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        print(f"Backoff abgeschlossen: {seconds} Sekunden")
+        return 0
+
     if command in ("help", "-h", "--help"):
         print("taskplan — Aufgabenverwaltung")
         print()
@@ -167,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         print("            Liefert Modus (surface/deep), Aufwand, Root, Projekt,")
         print("            Task-IDs und die Rechte in diesem Projekt.")
         print("            Exit 0 = Buendel da, 1 = nichts zu tun,")
-        print("            2 = Rolle abgeschaltet.")
+        print("            2 = Rolle abgeschaltet, 3 = Discovery wiederholbar.")
         print()
         print("  doctor    Zeigt, welche Datenbank benutzt wird, und warnt bei")
         print("            widerspruechlichen Fundstellen (leere aktive DB,")
@@ -176,6 +240,15 @@ def main(argv: list[str] | None = None) -> int:
         print("  prompt <ROLLE>")
         print("            Gibt den Rollen-Prompt aus (TASKSOLVER, TASKWRITER,")
         print("            MAINTAINER).")
+        print()
+        print("  runtime --role R [--provider P] [--field FELD]")
+        print("            Liefert Provider, Rollenmodell, Reasoning und Fortsetzung.")
+        print()
+        print("  startup-prompt --role R [--provider P]")
+        print("            Erzeugt fuer Codex den autorisierten Goal-Auftrag.")
+        print()
+        print("  backoff --role R [--provider P]")
+        print("            Erzwingt die konfigurierte Wartezeit vor einem Retry.")
         print()
         print("Als Bibliothek:  from taskplan import api as tasks")
         return 0

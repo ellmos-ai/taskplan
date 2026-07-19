@@ -14,12 +14,15 @@ antwortet, das LLM urteilt.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
 from .client import TaskClient
 from .config import (
     active_roles,
+    discovery_timeout_seconds,
     lock_config,
     model_for,
     selector_config,
@@ -27,6 +30,40 @@ from .config import (
 )
 from .locks import CREATE, MODIFY, READ, build_lock_view
 from .selector import next_bundle
+
+
+class ProjectDiscoveryTimeout(TimeoutError):
+    """Projekt-Discovery hat ihre konfigurierte harte Grenze ueberschritten."""
+
+
+def _discover_projects_bounded(timeout: float, force: bool = False):
+    """Discovery in einem abbrechbaren Unterprozess mit persistentem Cache."""
+    from .discovery import discover_cached
+    from .traversal import Project
+
+    if timeout <= 0:
+        return discover_cached(force=force)[0]
+    command = [sys.executable, "-m", "taskplan.discovery"]
+    if force:
+        command.append("--force")
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8",
+            timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ProjectDiscoveryTimeout(
+            f"Projekt-Discovery nach {timeout:g} Sekunden abgebrochen"
+        ) from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"Exit {completed.returncode}"
+        raise RuntimeError(f"Projekt-Discovery fehlgeschlagen: {detail}")
+    try:
+        data = json.loads(completed.stdout)
+        return [Project(path=Path(item["path"]), root_id=str(item["root_id"]))
+                for item in data.get("projects", [])]
+    except (ValueError, TypeError, KeyError) as exc:
+        raise RuntimeError("Projekt-Discovery lieferte ungueltiges JSON") from exc
 
 
 def _lock_view():
@@ -53,17 +90,6 @@ def next_work(role: str = "tasksolver") -> dict:
     view, provider = _lock_view()
 
     config = selector_config()
-    # Der TASKWRITER braucht die Projektliste: Ist alles eingestuft, sucht er
-    # das naechste Projekt, das noch GAR KEINE Aufgaben hat. Nur fuer ihn
-    # erheben - fuer den Solver waere es verschwendete Zeit.
-    if role in ("taskwriter", "maintainer"):
-        from .config import discovery_mode, registry_file, traversal_config
-        from .traversal import discover_projects
-        config.projects = discover_projects(traversal_config(), discovery_mode(),
-                                            registry_file())
-
-    bundle = next_bundle(config, store, view, role=role)
-
     result = {
         "role": role,
         "active": True,
@@ -71,6 +97,29 @@ def next_work(role: str = "tasksolver") -> dict:
         "lock_provider": provider,
         "db": str(store.db_path),
     }
+    # Der TASKWRITER braucht die Projektliste: Ist alles eingestuft, sucht er
+    # das naechste Projekt, das noch GAR KEINE Aufgaben hat. Nur fuer ihn
+    # erheben - fuer den Solver waere es verschwendete Zeit.
+    if role in ("taskwriter", "maintainer"):
+        timeout = discovery_timeout_seconds()
+        try:
+            config.projects = _discover_projects_bounded(timeout)
+        except (ProjectDiscoveryTimeout, RuntimeError) as exc:
+            error = ("project_discovery_timeout"
+                     if isinstance(exc, ProjectDiscoveryTimeout)
+                     else "project_discovery_error")
+            result.update({
+                "bundle": None,
+                "retryable": True,
+                "error": error,
+                "reason": (
+                    f"{exc}. Der Lauf endet kontrolliert statt zu haengen. "
+                    "Nach dem konfigurierten Backoff erneut versuchen."
+                ),
+            })
+            return result
+
+    bundle = next_bundle(config, store, view, role=role)
 
     # Fremde Lock-Regeln gehen als TEXT weiter — nicht ausgewertet, sondern
     # dem LLM zum Lesen gegeben.
@@ -126,11 +175,20 @@ def run(role: str = "tasksolver", as_json: bool = False) -> int:
 
     if as_json:
         print(json.dumps(work, ensure_ascii=False, indent=2))
+        if not work.get("active", True):
+            return 2
+        if work.get("retryable"):
+            return 3
         return 0 if work.get("bundle") else 1
 
     if not work["active"]:
         print(f"[{role.upper()}] {work['reason']}")
         return 2
+
+    if work.get("retryable"):
+        print(f"[{role.upper()}] Wiederholbarer Selektorfehler")
+        print(f"  {work['reason']}")
+        return 3
 
     print(f"[{role.upper()}]")
     print(f"  Datenbank : {work['db']}")

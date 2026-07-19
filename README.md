@@ -80,7 +80,8 @@ python -m taskplan projects list   # what does the loop see?
 python -m taskplan projects markers
 ```
 
-`next` exit codes: `0` = bundle returned · `1` = nothing to do · `2` = role disabled.
+`next` exit codes: `0` = bundle returned · `1` = nothing to do · `2` = role disabled
+· `3` = retryable selector/discovery timeout.
 
 ### Who created it, who works on it
 
@@ -201,9 +202,30 @@ reads the real rule than a parser that guesses at its meaning.
 ### Roles, models, task sources, depth
 
 All switchable. A disabled role **aborts cleanly on start** instead of silently
-idling. `combined = true` runs all active roles in one worker — so
-`maintainer = false` + `combined = true` gives you a 2-in-1 without needing its own
-mode. Model choice belongs in the config, not in the launcher.
+idling. `combined = true` is currently parsed and exposed as configuration, but no
+bundled runner or launcher consumes it yet; it is therefore not a functional
+3-in-1/2-in-1 mode. Model choice belongs in the config, not in the launcher.
+
+### Provider-neutral runtime and Codex goals
+
+Launchers are intentionally thin. `[execution] provider` selects a provider;
+`[providers.<name>.models]` and `[providers.<name>.reasoning_effort]` select values
+per role. The legacy `[models]` section remains a compatible fallback.
+
+Codex uses `continuation = "goal"`. TASKPLAN generates an explicit user startup
+prompt that authorizes a persisted goal, processes one bundle per continuation,
+then asks the selector again. `empty_policy = "keep_goal"` prevents a single empty
+result from being mistaken for a permanently empty queue. The generated goal
+contract must call `python -m taskplan backoff ...`; that command performs the real
+`idle_backoff_seconds` wait before polling again. `python -m taskplan runtime ...`
+exposes the profile to any shell; `python -m taskplan startup-prompt ...` emits the
+provider-specific user request. No user name, home path, or model is hardcoded in
+the launcher.
+
+Project discovery has its own `discovery_timeout_seconds` and a portable snapshot
+cache under `~/.taskplan/`. The scan runs in a killable child process. A
+cloud-filesystem stall returns exit `3` instead of pinning the worker forever; a goal
+can perform the real backoff and retry without leaking scan threads.
 
 ---
 

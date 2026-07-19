@@ -84,7 +84,7 @@ python -m taskplan projects markers
 ```
 
 Exit-Codes von `next`: `0` = Bündel geliefert · `1` = nichts zu tun · `2` = Rolle
-abgeschaltet.
+abgeschaltet · `3` = wiederholbarer Selektor-/Discovery-Timeout.
 
 ### Wer hat es angelegt, wer arbeitet daran
 
@@ -208,10 +208,34 @@ die echte Regel liest, als ein Parser, der ihre Bedeutung errät.
 ### Rollen, Modelle, Aufgabenquellen, Tiefe
 
 Alles schaltbar. Eine abgeschaltete Rolle **bricht beim Start sauber ab**, statt still
-leerzulaufen. `combined = true` führt alle aktiven Rollen in einem Worker aus — so
-ergibt `maintainer = false` + `combined = true` einen 2-in-1-Worker, ohne dass es
-dafür einen eigenen Modus bräuchte. Die Modellwahl gehört in die Konfiguration, nicht
-in den Starter.
+leerzulaufen. `combined = true` wird derzeit nur als Konfiguration gelesen und
+ausgegeben; noch kein mitgelieferter Runner oder Starter wertet es aus. Es ist daher
+noch kein funktionsfähiger 3-in-1-/2-in-1-Modus. Die Modellwahl gehört in die
+Konfiguration, nicht in den Starter.
+
+### Nutzerneutrale Provider-Runtime und Codex-Goals
+
+Starter bleiben bewusst dünn. `[execution] provider` wählt den Provider;
+`[providers.<name>.models]` und `[providers.<name>.reasoning_effort]` bestimmen Modell
+und Reasoning je Rolle. Die bisherige Sektion `[models]` bleibt als kompatibler
+Fallback erhalten.
+
+Codex nutzt `continuation = "goal"`. TASKPLAN erzeugt einen ausdrücklichen
+Nutzerauftrag, der ein persistiertes Goal autorisiert, pro Fortsetzung genau ein
+Bündel bearbeitet und danach erneut den Selektor fragt. `empty_policy = "keep_goal"`
+verhindert, dass ein einzelner Leerlauf als dauerhaft leere Queue missverstanden
+wird. Der erzeugte Goal-Vertrag muss `python -m taskplan backoff ...` aufrufen;
+dieser Befehl führt die Wartezeit aus `idle_backoff_seconds` tatsächlich aus, bevor
+erneut gepollt wird. `python -m taskplan runtime ...` liefert das Profil für
+beliebige Starter; `python -m taskplan startup-prompt ...` erzeugt den
+providerspezifischen Nutzerauftrag. Kein Benutzername, Home-Pfad oder Modell wird im
+Starter fest verdrahtet.
+
+Die Projekt-Discovery besitzt zusätzlich `discovery_timeout_seconds` und einen
+portablen Snapshot-Cache unter `~/.taskplan/`. Der Scan läuft in einem beendbaren
+Unterprozess. Hängt ein Cloud-Dateisystem, liefert `next` Exit `3`, statt den Worker
+dauerhaft festzuhalten; das Goal führt den realen Backoff aus und versucht erneut,
+ohne Scan-Threads anzuhäufen.
 
 ---
 

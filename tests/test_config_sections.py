@@ -48,8 +48,7 @@ class TestRoles(unittest.TestCase):
         self.assertFalse(roles["combined"])
 
     def test_two_in_one(self):
-        """maintainer=false + combined=true ergibt den 2-in-1-Worker —
-        ohne dass es dafuer einen eigenen Modus braucht."""
+        """Die reservierte combined-Einstellung bleibt maschinenlesbar."""
         with _with_config("[roles]\nmaintainer = false\ncombined = true\n"):
             roles = cfg.active_roles()
         self.assertFalse(roles["maintainer"])
@@ -77,7 +76,8 @@ class TestLockProvider(unittest.TestCase):
 class TestModels(unittest.TestCase):
     def test_role_model_beats_default(self):
         with _with_config('[models]\ndefault = "sonnet-5"\n'
-                          'tasksolver = "opus-4-8"\n'):
+                          'tasksolver = "opus-4-8"\n'), \
+                mock.patch.dict(cfg.os.environ, {"TASKPLAN_PROVIDER": ""}):
             self.assertEqual(cfg.model_for("tasksolver"), "opus-4-8")
             self.assertEqual(cfg.model_for("taskwriter"), "sonnet-5")
 

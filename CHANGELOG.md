@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- Nutzerneutrale Provider-Runtime mit rollenbezogenen Modellen und Reasoning
+  unter `[providers.<name>]`; die bisherige `[models]`-Sektion bleibt kompatibel.
+- Codex-Adapterprofil `continuation = "goal"` mit explizit autorisierendem
+  Startup-Prompt, Leerlauf-Policy und technisch ausgeführtem Backoff.
+- CLI-Befehle `runtime`, `startup-prompt` und `backoff` für dünne, portable Starter.
+- Begrenzte Projekt-Discovery: konfigurierbarer Timeout liefert Exit-Code `3`
+  statt TASKWRITER oder MAINTAINER auf Cloud-Dateisystemen festzuhalten; der
+  Scan läuft abbrechbar im Unterprozess und nutzt einen invalidierbaren Cache.
+
 ### Security
 - Repository-Hygiene erweitert: lokale Env-/Token-/Credential-/Recovery-/Key-,
   Zertifikats- und SQLite-Sidecar-Dateien werden ignoriert und per Test
