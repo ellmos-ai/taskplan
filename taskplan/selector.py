@@ -54,6 +54,8 @@ class TaskStore(Protocol):
 
     def list(self, **kwargs) -> list: ...
 
+    def get(self, task_id: int) -> Optional[dict]: ...
+
 
 @dataclass
 class SelectorConfig:
@@ -110,6 +112,49 @@ def _reachable(task: dict, locks: LockView) -> bool:
     return locks.allows(Path(project), MODIFY)
 
 
+def _dependency_ids(task: dict) -> Optional[tuple[int, ...]]:
+    """Liest `depends-on=1,2` aus dem bestehenden Semikolon-Tagformat.
+
+    `()` bedeutet: keine Abhaengigkeit deklariert. `None` bedeutet: Ein
+    `depends-on`-Tag ist vorhanden, aber leer oder ungueltig. Ein kaputter
+    Abhaengigkeitsvertrag darf nicht versehentlich als Freigabe gelten.
+    """
+    dependencies = []
+    declared = False
+    for tag in str(task.get("tags") or "").split(";"):
+        key, separator, value = tag.partition("=")
+        if not separator or key.strip().lower() != "depends-on":
+            continue
+        declared = True
+        raw_ids = [raw_id.strip() for raw_id in value.split(",")]
+        if not raw_ids or any(not raw_id for raw_id in raw_ids):
+            return None
+        for raw_id in raw_ids:
+            try:
+                dependency_id = int(raw_id)
+            except ValueError:
+                return None
+            if dependency_id <= 0:
+                return None
+            if dependency_id not in dependencies:
+                dependencies.append(dependency_id)
+    if not declared:
+        return ()
+    return tuple(dependencies)
+
+
+def _dependencies_satisfied(task: dict, store: TaskStore) -> bool:
+    """Nur vollstaendig erledigte Vorstufen geben einen Solver-Task frei."""
+    dependency_ids = _dependency_ids(task)
+    if dependency_ids is None:
+        return False
+    for dependency_id in dependency_ids:
+        dependency = store.get(dependency_id)
+        if dependency is None or dependency.get("status") != "done":
+            return False
+    return True
+
+
 def _candidates(store: TaskStore, effort: str, locks: LockView,
                 surface: bool) -> List[dict]:
     """Offene, erreichbare Aufgaben eines Aufwandsgrads.
@@ -126,6 +171,8 @@ def _candidates(store: TaskStore, effort: str, locks: LockView,
         if surface == has_project:
             continue
         if not _reachable(task, locks):
+            continue
+        if not _dependencies_satisfied(task, store):
             continue
         out.append(task)
     return out

@@ -36,6 +36,9 @@ class FakeStore:
             out = [t for t in out if t["effort"] == effort]
         return out[:limit]
 
+    def get(self, task_id):
+        return next((t for t in self.tasks if t["id"] == task_id), None)
+
 
 def task(title, effort="easy", project="", root="", scope="local"):
     return {"title": title, "effort": effort, "project_path": project,
@@ -135,6 +138,56 @@ class TestGates(unittest.TestCase):
         config = SelectorConfig(effort_ceiling="easy")
         store = FakeStore([task("M", effort="medium", root=".AI")])
         self.assertIsNone(next_bundle(config, store, self.locks))
+
+
+class TestDependencies(unittest.TestCase):
+    """Offene Vorstufen duerfen den Solver nicht in eine Sackgasse schicken."""
+
+    def setUp(self):
+        self.config = SelectorConfig()
+        self.locks = LockView()
+
+    def test_open_dependency_skips_task_and_selects_next_project(self):
+        prerequisite = task("Rate-Entscheid", effort="special",
+                            project="/p/connes", root=".RESEARCH")
+        prerequisite["id"] = 307
+        blocked = task("Paper finalisieren", effort="medium",
+                       project="/p/connes", root=".RESEARCH")
+        blocked.update(id=308, tags="stable-id=CH-TEX-004;depends-on=307")
+        next_project = task("Naechstes ausfuehrbares Projekt", effort="medium",
+                            project="/p/next", root=".RESEARCH")
+        next_project["id"] = 400
+
+        bundle = next_bundle(
+            self.config,
+            FakeStore([blocked, prerequisite, next_project]),
+            self.locks,
+        )
+
+        self.assertIsNotNone(bundle)
+        self.assertEqual(bundle.project_path, "/p/next")
+        self.assertEqual(bundle.tasks[0]["id"], 400)
+
+    def test_task_becomes_selectable_after_dependency_is_done(self):
+        prerequisite = task("Rate-Entscheid", effort="special",
+                            project="/p/connes", root=".RESEARCH")
+        prerequisite.update(id=307, status="done")
+        dependent = task("Paper finalisieren", effort="medium",
+                         project="/p/connes", root=".RESEARCH")
+        dependent.update(id=308, tags="depends-on=307;stable-id=CH-TEX-004")
+        next_project = task("Naechstes Projekt", effort="medium",
+                            project="/p/next", root=".RESEARCH")
+        next_project["id"] = 400
+
+        bundle = next_bundle(
+            self.config,
+            FakeStore([dependent, prerequisite, next_project]),
+            self.locks,
+        )
+
+        self.assertIsNotNone(bundle)
+        self.assertEqual(bundle.project_path, "/p/connes")
+        self.assertEqual(bundle.tasks[0]["id"], 308)
 
 
 class TestLockAwareness(unittest.TestCase):
