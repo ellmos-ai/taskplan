@@ -39,3 +39,6 @@ build/
 
 # OneDrive conflict copies
 *-Mac Studio.*
+
+# Interne Umbau-/Planungsdokumente
+UMBAU-KONZEPT.md
